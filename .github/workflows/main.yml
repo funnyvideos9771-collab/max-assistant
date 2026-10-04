@@ -28,27 +28,41 @@ jobs:
           flutter create . --platforms=android --org com.example.max_assistant --project-name max_assistant
           flutter pub add speech_to_text flutter_tts http shared_preferences torch_light url_launcher permission_handler
 
-      - name: Fix Android SDK Versions Properly
+      - name: Fix Kotlin and Android SDK Versions Properly
         run: |
           APP_GRADLE="android/app/build.gradle"
-          python3 -c "
-          with open('$APP_GRADLE', 'r') as f:
-              content = f.read()
-
-          # Replace compileSdkVersion, targetSdkVersion, minSdkVersion cleanly
-          content = content.replace('compileSdkVersion flutter.compileSdkVersion', 'compileSdkVersion 34')
-          content = content.replace('targetSdkVersion flutter.targetSdkVersion', 'targetSdkVersion 34')
-          content = content.replace('minSdkVersion flutter.minSdkVersion', 'minSdkVersion 21')
+          PROJECT_GRADLE="android/build.gradle"
           
-          # In case they are written with numbers already
-          if 'minSdkVersion 16' in content:
-              content = content.replace('minSdkVersion 16', 'minSdkVersion 21')
-          if 'minSdkVersion 19' in content:
-              content = content.replace('minSdkVersion 19', 'minSdkVersion 21')
+          python3 -c "
+          import os
 
-          with open('$APP_GRADLE', 'w') as f:
-              f.write(content)
-          print('Successfully updated build.gradle SDK versions!')
+          # Fix app/build.gradle SDK versions
+          if os.path.exists('$APP_GRADLE'):
+              with open('$APP_GRADLE', 'r') as f:
+                  content = f.read()
+              content = content.replace('compileSdkVersion flutter.compileSdkVersion', 'compileSdkVersion 34')
+              content = content.replace('targetSdkVersion flutter.targetSdkVersion', 'targetSdkVersion 34')
+              content = content.replace('minSdkVersion flutter.minSdkVersion', 'minSdkVersion 21')
+              if 'minSdkVersion 16' in content:
+                  content = content.replace('minSdkVersion 16', 'minSdkVersion 21')
+              if 'minSdkVersion 19' in content:
+                  content = content.replace('minSdkVersion 19', 'minSdkVersion 21')
+              with open('$APP_GRADLE', 'w') as f:
+                  f.write(content)
+
+          # Fix root android/build.gradle Kotlin version
+          if os.path.exists('$PROJECT_GRADLE'):
+              with open('$PROJECT_GRADLE', 'r') as f:
+                  pcontent = f.read()
+              if 'ext.kotlin_version' in pcontent:
+                  import re
+                  pcontent = re.sub(r'ext.kotlin_version\s*=\s*[\"'].*?[\"']', \"ext.kotlin_version = '1.9.22'\", pcontent)
+              else:
+                  pcontent = \"buildscript { ext.kotlin_version = '1.9.22' }\\n\" + pcontent
+              with open('$PROJECT_GRADLE', 'w') as f:
+                  f.write(pcontent)
+
+          print('Successfully updated Gradle and Kotlin versions!')
           "
 
           MANIFEST="android/app/src/main/AndroidManifest.xml"
