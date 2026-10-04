@@ -22,74 +22,10 @@ jobs:
         with:
           flutter-version: '3.19.6'
 
-      - name: Re-create Clean Flutter Project
+      - name: Create Clean Flutter Project
         run: |
-          rm -rf android lib pubspec.yaml
           flutter create . --platforms=android --org com.example.max_assistant --project-name max_assistant
           flutter pub add speech_to_text flutter_tts http shared_preferences torch_light url_launcher permission_handler
-
-      - name: Clean Gradle and Fix Configuration
-        run: |
-          WRAPPER_PROP="android/gradle/wrapper/gradle-wrapper.properties"
-          if [ -f "$WRAPPER_PROP" ]; then
-            echo "distributionUrl=https\://services.gradle.org/distributions/gradle-8.4-bin.zip" > "$WRAPPER_PROP"
-          fi
-
-          SETTINGS_GRADLE="android/settings.gradle"
-          if [ -f "$SETTINGS_GRADLE" ]; then
-            cat << 'EOF' > "$SETTINGS_GRADLE"
-          pluginManagement {
-              def flutterSdkPath = {
-                  def properties = new Properties()
-                  def file = new File('local.properties')
-                  if (file.exists()) {
-                      properties.load(new FileInputStream(file))
-                  }
-                  def flutterSdkPath = properties.getProperty('flutter.sdk')
-                  assert flutterSdkPath != null, "flutter.sdk not set in local.properties"
-                  return flutterSdkPath
-              }()
-
-              includeBuild "$flutterSdkPath/packages/flutter_tools/gradle"
-
-              repositories {
-                  google()
-                  mavenCentral()
-                  gradlePluginPortal()
-              }
-          }
-
-          plugins {
-              id "dev.flutter.flutter-plugin-loader" version "1.0.0"
-              id "com.android.application" version "7.3.0" apply false
-              id "org.jetbrains.kotlin.android" version "1.9.22" apply false
-          }
-
-          include ":app"
-          EOF
-          fi
-
-          APP_GRADLE="android/app/build.gradle"
-          if [ -f "$APP_GRADLE" ]; then
-            python3 -c "
-            path = 'android/app/build.gradle'
-            with open(path, 'r') as f:
-                content = f.read()
-            content = content.replace('compileSdkVersion flutter.compileSdkVersion', 'compileSdkVersion 34')
-            content = content.replace('targetSdkVersion flutter.targetSdkVersion', 'targetSdkVersion 34')
-            content = content.replace('minSdkVersion flutter.minSdkVersion', 'minSdkVersion 21')
-            content = content.replace('minSdkVersion 16', 'minSdkVersion 21')
-            content = content.replace('minSdkVersion 19', 'minSdkVersion 21')
-            with open(path, 'w') as f:
-                f.write(content)
-            "
-          fi
-
-          MANIFEST="android/app/src/main/AndroidManifest.xml"
-          if [ -f "$MANIFEST" ]; then
-            PERMS='<uses-permission android:name="android.permission.RECORD_AUDIO" />\n    <uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.WAKE_LOCK" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />\n    <uses-permission android:name="android.permission.CAMERA" />\n    <uses-permission android:name="android.permission.CALL_PHONE" />'
-            awk -v p="$PERMS" '/<application/{print p}1' $MANIFEST > $MANIFEST.tmp && mv $MANIFEST.tmp $MANIFEST
-          fi
 
       - name: Create lib/main.dart Code
         run: |
@@ -631,9 +567,6 @@ jobs:
             }
           }
           EOF
-
-      - name: Install dependencies
-        run: flutter pub get
 
       - name: Build APK
         run: flutter build apk --release --no-tree-shake-icons
