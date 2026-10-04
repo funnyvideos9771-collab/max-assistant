@@ -26,9 +26,9 @@ jobs:
         run: |
           rm -rf android lib pubspec.yaml
           flutter create . --platforms=android --org com.example.max_assistant --project-name max_assistant
-          flutter pub add speech_to_text flutter_tts http shared_preferences torch_light url_launcher flutter_contacts permission_handler
+          flutter pub add speech_to_text flutter_tts http shared_preferences torch_light url_launcher permission_handler
 
-      - name: Configure Gradle & Kotlin Compatibility
+      - name: Configure Gradle & SDK Versions
         run: |
           GRADLE_BUILD="android/build.gradle"
           if [ -f "$GRADLE_BUILD" ]; then
@@ -45,11 +45,13 @@ jobs:
             sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 21/g' $APP_GRADLE || true
             sed -i 's/minSdkVersion 16/minSdkVersion 21/g' $APP_GRADLE || true
             sed -i 's/minSdkVersion 19/minSdkVersion 21/g' $APP_GRADLE || true
+            sed -i 's/targetSdkVersion flutter.targetSdkVersion/targetSdkVersion 34/g' $APP_GRADLE || true
+            sed -i 's/compileSdkVersion flutter.compileSdkVersion/compileSdkVersion 34/g' $APP_GRADLE || true
           fi
 
           MANIFEST="android/app/src/main/AndroidManifest.xml"
           if [ -f "$MANIFEST" ]; then
-            PERMS='<uses-permission android:name="android.permission.RECORD_AUDIO" />\n    <uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.WAKE_LOCK" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />\n    <uses-permission android:name="android.permission.CAMERA" />\n    <uses-permission android:name="android.permission.CALL_PHONE" />\n    <uses-permission android:name="android.permission.READ_CONTACTS" />'
+            PERMS='<uses-permission android:name="android.permission.RECORD_AUDIO" />\n    <uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.WAKE_LOCK" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />\n    <uses-permission android:name="android.permission.CAMERA" />\n    <uses-permission android:name="android.permission.CALL_PHONE" />'
             awk -v p="$PERMS" '/<application/{print p}1' $MANIFEST > $MANIFEST.tmp && mv $MANIFEST.tmp $MANIFEST
           fi
 
@@ -141,7 +143,6 @@ jobs:
                 Permission.microphone,
                 Permission.camera,
                 Permission.phone,
-                Permission.contacts,
               ].request();
             }
 
