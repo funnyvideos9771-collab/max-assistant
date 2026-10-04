@@ -22,15 +22,10 @@ jobs:
         with:
           flutter-version: '3.19.6'
 
-      - name: Clean & Re-create Android Project
+      - name: Clean & Re-create Android Setup
         run: |
           rm -rf android
           flutter create . --platforms=android --org com.example.max_assistant --project-name max_assistant
-
-      - name: Fix Kotlin Version
-        run: |
-          sed -i "s/ext.kotlin_version = .*/ext.kotlin_version = '1.9.22'/g" android/build.gradle || true
-          sed -i 's/id "org.jetbrains.kotlin.android" version ".*"/id "org.jetbrains.kotlin.android" version "1.9.22"/g' android/settings.gradle || true
 
       - name: Install dependencies
         run: flutter pub get
