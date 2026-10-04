@@ -22,7 +22,7 @@ jobs:
         with:
           flutter-version: '3.19.6'
 
-      - name: Clean & Re-create Android Setup
+      - name: Re-create Clean Flutter Project
         run: |
           rm -rf android lib
           flutter create . --platforms=android --org com.example.max_assistant --project-name max_assistant
@@ -30,7 +30,7 @@ jobs:
 
       - name: Configure Android Permissions and Gradle
         run: |
-          python3 - << 'EOF'
+          python3 -c "
           import os, re
 
           # 1. Update settings.gradle (Kotlin 1.9.22)
@@ -38,7 +38,7 @@ jobs:
           if os.path.exists(s_file):
               with open(s_file, 'r') as f:
                   txt = f.read()
-              txt = re.sub(r'org\.jetbrains\.kotlin\.android.*version\s+["\'][^"\']+["\']', 'org.jetbrains.kotlin.android" version "1.9.22"', txt)
+              txt = re.sub(r'org\.jetbrains\.kotlin\.android.*version\s+[\"'][^\"']+[\"']', 'org.jetbrains.kotlin.android\" version \"1.9.22\"', txt)
               with open(s_file, 'w') as f:
                   f.write(txt)
 
@@ -48,13 +48,13 @@ jobs:
               with open(b_file, 'r') as f:
                   txt = f.read()
               if 'ext.kotlin_version' in txt:
-                  txt = re.sub(r'ext\.kotlin_version\s*=\s*["\'][^"\']+["\']', "ext.kotlin_version = '1.9.22'", txt)
+                  txt = re.sub(r'ext\.kotlin_version\s*=\s*[\"'][^\"']+[\"']', \"ext.kotlin_version = '1.9.22'\", txt)
               else:
-                  txt = "buildscript {\n    ext.kotlin_version = '1.9.22'\n}\n" + txt
+                  txt = \"buildscript {\n    ext.kotlin_version = '1.9.22'\n}\n\" + txt
               with open(b_file, 'w') as f:
                   f.write(txt)
 
-          # 3. Update app/build.gradle (minSdkVersion 21)
+          # 3. Update app/build.gradle
           app_b_file = 'android/app/build.gradle'
           if os.path.exists(app_b_file):
               with open(app_b_file, 'r') as f:
@@ -64,25 +64,19 @@ jobs:
               with open(app_b_file, 'w') as f:
                   f.write(txt)
 
-          # 4. Inject Background & Record Permissions
+          # 4. Inject Permissions
           m_file = 'android/app/src/main/AndroidManifest.xml'
           if os.path.exists(m_file):
               with open(m_file, 'r') as f:
                   txt = f.read()
               if 'RECORD_AUDIO' not in txt:
-                  perms = '''    <uses-permission android:name="android.permission.RECORD_AUDIO" />
-      <uses-permission android:name="android.permission.INTERNET" />
-      <uses-permission android:name="android.permission.WAKE_LOCK" />
-      <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-  '''
-                  txt = txt.replace('<application', perms + '    <application')
+                  perms = '<uses-permission android:name=\"android.permission.RECORD_AUDIO\" />\n<uses-permission android:name=\"android.permission.INTERNET\" />\n<uses-permission android:name=\"android.permission.WAKE_LOCK\" />\n<uses-permission android:name=\"android.permission.FOREGROUND_SERVICE\" />\n'
+                  txt = txt.replace('<application', perms + '<application')
                   with open(m_file, 'w') as f:
                       f.write(txt)
+          "
 
-          print("Gradle and Manifest configured successfully.")
-          EOF
-
-      - name: Generate Multi-AI lib/main.dart Code
+      - name: Create lib/main.dart Code
         run: |
           mkdir -p lib
           cat << 'EOF' > lib/main.dart
