@@ -27,7 +27,11 @@ jobs:
           rm -rf android
           flutter create . --platforms=android --org com.example.max_assistant --project-name max_assistant
 
-      - name: Configure Android Permissions and Gradle
+      - name: Add Required Flutter Packages
+        run: |
+          flutter pub add speech_to_text flutter_tts http shared_preferences
+
+      - name: Configure Android Permissions and Update main.dart
         run: |
           python3 - << 'EOF'
           import os, re
@@ -63,7 +67,7 @@ jobs:
               with open(app_b_file, 'w') as f:
                   f.write(txt)
 
-          # 4. Inject permissions into existing AndroidManifest.xml
+          # 4. Inject permissions into AndroidManifest.xml
           m_file = 'android/app/src/main/AndroidManifest.xml'
           if os.path.exists(m_file):
               with open(m_file, 'r') as f:
@@ -74,7 +78,318 @@ jobs:
                   with open(m_file, 'w') as f:
                       f.write(txt)
 
-          print("Setup configured successfully.")
+          # 5. Overwrite lib/main.dart with Full Gemini AI Power & Key Settings
+          main_dart = """import 'package:flutter/material.dart';
+          import 'package:speech_to_text/speech_to_text.dart' as stt;
+          import 'package:flutter_tts/flutter_tts.dart';
+          import 'package:http/http.dart' as http;
+          import 'package:shared_preferences/shared_preferences.dart';
+          import 'dart:convert';
+
+          void main() {
+            runApp(const MaxAiApp());
+          }
+
+          class MaxAiApp extends StatelessWidget {
+            const MaxAiApp({super.key});
+
+            @override
+            Widget build(BuildContext context) {
+              return MaterialApp(
+                debugShowCheckedModeBanner: false,
+                title: 'Max AI Assistant',
+                theme: ThemeData.dark().copyWith(
+                  scaffoldBackgroundColor: const Color(0xFF0F172A),
+                  colorScheme: const ColorScheme.dark(primary: Colors.cyan),
+                ),
+                home: const HomeScreen(),
+              );
+            }
+          }
+
+          class HomeScreen extends StatefulWidget {
+            const HomeScreen({super.key});
+
+            @override
+            State<HomeScreen> createState() => _HomeScreenState();
+          }
+
+          class _HomeScreenState extends State<HomeScreen> {
+            late stt.SpeechToText _speech;
+            late FlutterTts _flutterTts;
+            bool _isListening = false;
+            bool _isLoading = false;
+            String _userSpeech = "";
+            String _aiResponse = "Tap mic and ask anything!";
+            String _apiKey = "";
+
+            @override
+            void initState() {
+              super.initState();
+              _speech = stt.SpeechToText();
+              _flutterTts = FlutterTts();
+              _initTts();
+              _loadApiKey();
+            }
+
+            void _initTts() async {
+              await _flutterTts.setLanguage("hi-IN");
+              await _flutterTts.setPitch(1.0);
+              await _flutterTts.setSpeechRate(0.5);
+            }
+
+            void _loadApiKey() async {
+              SharedPreferences prefs = await SharedPreferences.getInstance();
+              setState(() {
+                _apiKey = prefs.getString('gemini_api_key') ?? "";
+              });
+            }
+
+            void _saveApiKey(String key) async {
+              SharedPreferences prefs = await SharedPreferences.getInstance();
+              await prefs.setString('gemini_api_key', key);
+              setState(() {
+                _apiKey = key;
+              });
+            }
+
+            void _showApiKeyDialog() {
+              TextEditingController controller = TextEditingController(text: _apiKey);
+              showDialog(
+                context: context,
+                builder: (context) => AlertDialog(
+                  backgroundColor: const Color(0xFF1E293B),
+                  title: const Text('Enter Gemini API Key'),
+                  content: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text(
+                        'Get a free API Key from Google AI Studio (aistudio.google.com)',
+                        style: TextStyle(fontSize: 12, color: Colors.grey),
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: controller,
+                        decoration: const InputDecoration(
+                          hintText: 'Paste AI API Key here',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                    ],
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text('Cancel'),
+                    ),
+                    ElevatedButton(
+                      onPressed: () {
+                        _saveApiKey(controller.text.trim());
+                        Navigator.pop(context);
+                      },
+                      child: const Text('Save Key'),
+                    ),
+                  ],
+                ),
+              );
+            }
+
+            void _listen() async {
+              if (!_isListening) {
+                bool available = await _speech.initialize(
+                  onStatus: (val) {
+                    if (val == 'done' || val == 'notListening') {
+                      setState(() => _isListening = false);
+                      if (_userSpeech.isNotEmpty) {
+                        _getAiResponse(_userSpeech);
+                      }
+                    }
+                  },
+                  onError: (val) => setState(() => _isListening = false),
+                );
+                if (available) {
+                  setState(() {
+                    _isListening = true;
+                    _userSpeech = "";
+                    _aiResponse = "Listening... Bolna shuru karein";
+                  });
+                  _speech.listen(
+                    onResult: (val) => setState(() {
+                      _userSpeech = val.recognizedWords;
+                    }),
+                  );
+                }
+              } else {
+                setState(() => _isListening = false);
+                _speech.stop();
+              }
+            }
+
+            Future<void> _getAiResponse(String prompt) async {
+              setState(() {
+                _isLoading = true;
+                _aiResponse = "Thinking...";
+              });
+
+              try {
+                if (_apiKey.isEmpty) {
+                  _speakAndShow("Kripya App Settings (⚙️) me jakar Gemini API Key daalein taaki main har sawaal ka jawab de saku!");
+                  return;
+                }
+
+                final url = Uri.parse(
+                    'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$_apiKey');
+
+                final response = await http.post(
+                  url,
+                  headers: {'Content-Type': 'application/json'},
+                  body: jsonEncode({
+                    "contents": [
+                      {
+                        "parts": [
+                          {
+                            "text": "Aap Max AI hain, ek smart AI Assistant. Is sawaal ka short, clear aur helpful Hindi/Hinglish me jawab dein: $prompt"
+                          }
+                        ]
+                      }
+                    ]
+                  }),
+                );
+
+                if (response.statusCode == 200) {
+                  final data = jsonDecode(response.body);
+                  String text = data['candidates'][0]['content']['parts'][0]['text'];
+                  _speakAndShow(text.trim());
+                } else {
+                  _speakAndShow("API Key galat hai ya limit khatam ho gayi hai. Kripya settings check karein.");
+                }
+              } catch (e) {
+                _speakAndShow("Internet connect nahi ho pa raha hai. Dobara try karein.");
+              }
+            }
+
+            void _speakAndShow(String text) async {
+              setState(() {
+                _isLoading = false;
+                _aiResponse = text;
+              });
+              await _flutterTts.stop();
+              await _flutterTts.speak(text);
+            }
+
+            @override
+            Widget build(BuildContext context) {
+              return Scaffold(
+                appBar: AppBar(
+                  title: const Text('MAX AI ASSISTANT'),
+                  centerTitle: true,
+                  backgroundColor: Colors.transparent,
+                  elevation: 0,
+                  actions: [
+                    IconButton(
+                      icon: Icon(
+                        Icons.settings,
+                        color: _apiKey.isNotEmpty ? Colors.cyan : Colors.orange,
+                      ),
+                      onPressed: _showApiKeyDialog,
+                    )
+                  ],
+                ),
+                body: Padding(
+                  padding: const EdgeInsets.all(24.0),
+                  child: Column(
+                    children: [
+                      if (_apiKey.isEmpty)
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          margin: const EdgeInsets.bottom(12),
+                          decoration: BoxDecoration(
+                            color: Colors.orange.withOpacity(0.2),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.orange),
+                          ),
+                          child: const Text(
+                            "⚠️ Top-Right Settings (⚙️) icon par click karke Free Gemini API Key daalein!",
+                            style: TextStyle(color: Colors.orange, fontSize: 13),
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                      if (_userSpeech.isNotEmpty)
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.white10,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Text(
+                            'Aapne Kaha: "$_userSpeech"',
+                            style: const TextStyle(color: Colors.cyanAccent, fontSize: 16),
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                      const Spacer(),
+                      AnimatedContainer(
+                        duration: const Duration(milliseconds: 300),
+                        width: 140,
+                        height: 140,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: _isListening
+                              ? Colors.redAccent.withOpacity(0.2)
+                              : Colors.cyan.withOpacity(0.2),
+                          border: Border.all(
+                            color: _isListening ? Colors.redAccent : Colors.cyan,
+                            width: 3,
+                          ),
+                        ),
+                        child: Icon(
+                          _isListening ? Icons.graphic_eq : Icons.psychology,
+                          size: 60,
+                          color: _isListening ? Colors.redAccent : Colors.cyan,
+                        ),
+                      ),
+                      const SizedBox(height: 30),
+                      _isLoading
+                          ? const CircularProgressIndicator(color: Colors.cyan)
+                          : SingleChildScrollView(
+                              child: Text(
+                                _aiResponse,
+                                style: const TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w500),
+                                textAlign: TextAlign.center,
+                              ),
+                            ),
+                      const Spacer(),
+                      GestureDetector(
+                        onTap: _listen,
+                        child: CircleAvatar(
+                          radius: 40,
+                          backgroundColor: _isListening ? Colors.redAccent : Colors.cyan,
+                          child: Icon(
+                            _isListening ? Icons.stop : Icons.mic,
+                            color: Colors.white,
+                            size: 36,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        _isListening ? "Listening... Tap to stop" : "Tap mic and ask anything",
+                        style: const TextStyle(color: Colors.grey, fontSize: 14),
+                      ),
+                      const SizedBox(height: 20),
+                    ],
+                  ),
+                ),
+              );
+            }
+          }
+          """
+
+          os.makedirs('lib', exist_ok=True)
+          with open('lib/main.dart', 'w') as f:
+              f.write(main_dart)
+
+          print("App updated with Gemini AI & Settings support.")
           EOF
 
       - name: Install dependencies
