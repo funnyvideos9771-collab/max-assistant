@@ -11,6 +11,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Backup Manifest
+        run: |
+          mkdir -p temp_backup
+          cp android/app/src/main/AndroidManifest.xml temp_backup/ || true
+
       - name: Set up Java
         uses: actions/setup-java@v4
         with:
@@ -22,8 +27,13 @@ jobs:
         with:
           flutter-version: '3.27.x'
 
-      - name: Re-generate Android Project Files
-        run: flutter create . --platforms=android --org com.example
+      - name: Clean & Re-create Android Project
+        run: |
+          rm -rf android
+          flutter create . --platforms=android --org com.example.max_assistant --project-name max_assistant
+          if [ -f temp_backup/AndroidManifest.xml ]; then
+            cp temp_backup/AndroidManifest.xml android/app/src/main/AndroidManifest.xml
+          fi
 
       - name: Install dependencies
         run: flutter pub get
