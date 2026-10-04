@@ -29,29 +29,29 @@ jobs:
 
       - name: Force Kotlin 1.9.22 Version
         run: |
-          python3 -c '
-          import re, os
+          python3 - << 'EOF'
+          import os, re
 
-          s_file = "android/settings.gradle"
+          s_file = 'android/settings.gradle'
           if os.path.exists(s_file):
-              with open(s_file, "r") as f:
+              with open(s_file, 'r') as f:
                   txt = f.read()
-              txt = re.sub(r"org\.jetbrains\.kotlin\.android\" version \"[^\"]+\"", "org.jetbrains.kotlin.android\" version \"1.9.22\"", txt)
-              txt = re.sub(r"org\.jetbrains\.kotlin\.android.*version\s+[\"'\"][^\"'\"]+[\"'\"]", "org.jetbrains.kotlin.android\" version \"1.9.22\"", txt)
-              with open(s_file, "w") as f:
+              txt = re.sub(r'org\.jetbrains\.kotlin\.android.*version\s+["\'][^"\']+["\']', 'org.jetbrains.kotlin.android" version "1.9.22"', txt)
+              with open(s_file, 'w') as f:
                   f.write(txt)
 
-          b_file = "android/build.gradle"
+          b_file = 'android/build.gradle'
           if os.path.exists(b_file):
-              with open(b_file, "r") as f:
+              with open(b_file, 'r') as f:
                   txt = f.read()
-              if "ext.kotlin_version" in txt:
-                  txt = re.sub(r"ext\.kotlin_version\s*=\s*[\"'\"][^\"'\"]+[\"'\"]", "ext.kotlin_version = '\''1.9.22'\''", txt)
+              if 'ext.kotlin_version' in txt:
+                  txt = re.sub(r'ext\.kotlin_version\s*=\s*["\'][^"\']+["\']', "ext.kotlin_version = '1.9.22'", txt)
               else:
-                  txt = "buildscript {\n    ext.kotlin_version = '\''1.9.22'\''\n}\n" + txt
-              with open(b_file, "w") as f:
+                  txt = "buildscript {\n    ext.kotlin_version = '1.9.22'\n}\n" + txt
+              with open(b_file, 'w') as f:
                   f.write(txt)
-          '
+          print("Kotlin version 1.9.22 successfully forced.")
+          EOF
 
       - name: Install dependencies
         run: flutter pub get
