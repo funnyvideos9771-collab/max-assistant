@@ -30,51 +30,28 @@ jobs:
 
       - name: Configure Android Permissions and Gradle
         run: |
-          python3 -c "
-          import os, re
-
           # 1. Update settings.gradle (Kotlin 1.9.22)
-          s_file = 'android/settings.gradle'
-          if os.path.exists(s_file):
-              with open(s_file, 'r') as f:
-                  txt = f.read()
-              txt = re.sub(r'org\.jetbrains\.kotlin\.android.*version\s+[\"'][^\"']+[\"']', 'org.jetbrains.kotlin.android\" version \"1.9.22\"', txt)
-              with open(s_file, 'w') as f:
-                  f.write(txt)
+          if [ -f "android/settings.gradle" ]; then
+            sed -i -E 's/org\.jetbrains\.kotlin\.android" version "[^"]+"/org.jetbrains.kotlin.android" version "1.9.22"/g' android/settings.gradle
+          fi
 
           # 2. Update build.gradle
-          b_file = 'android/build.gradle'
-          if os.path.exists(b_file):
-              with open(b_file, 'r') as f:
-                  txt = f.read()
-              if 'ext.kotlin_version' in txt:
-                  txt = re.sub(r'ext\.kotlin_version\s*=\s*[\"'][^\"']+[\"']', \"ext.kotlin_version = '1.9.22'\", txt)
-              else:
-                  txt = \"buildscript {\n    ext.kotlin_version = '1.9.22'\n}\n\" + txt
-              with open(b_file, 'w') as f:
-                  f.write(txt)
+          if [ -f "android/build.gradle" ]; then
+            sed -i "s/ext.kotlin_version = .*/ext.kotlin_version = '1.9.22'/g" android/build.gradle
+          fi
 
-          # 3. Update app/build.gradle
-          app_b_file = 'android/app/build.gradle'
-          if os.path.exists(app_b_file):
-              with open(app_b_file, 'r') as f:
-                  txt = f.read()
-              txt = re.sub(r'minSdkVersion\s+.*', 'minSdkVersion 21', txt)
-              txt = re.sub(r'flutter\.minSdkVersion', '21', txt)
-              with open(app_b_file, 'w') as f:
-                  f.write(txt)
+          # 3. Update app/build.gradle (minSdkVersion 21)
+          if [ -f "android/app/build.gradle" ]; then
+            sed -i 's/minSdkVersion .*/minSdkVersion 21/g' android/app/build.gradle
+            sed -i 's/flutter.minSdkVersion/21/g' android/app/build.gradle
+          fi
 
-          # 4. Inject Permissions
-          m_file = 'android/app/src/main/AndroidManifest.xml'
-          if os.path.exists(m_file):
-              with open(m_file, 'r') as f:
-                  txt = f.read()
-              if 'RECORD_AUDIO' not in txt:
-                  perms = '<uses-permission android:name=\"android.permission.RECORD_AUDIO\" />\n<uses-permission android:name=\"android.permission.INTERNET\" />\n<uses-permission android:name=\"android.permission.WAKE_LOCK\" />\n<uses-permission android:name=\"android.permission.FOREGROUND_SERVICE\" />\n'
-                  txt = txt.replace('<application', perms + '<application')
-                  with open(m_file, 'w') as f:
-                      f.write(txt)
-          "
+          # 4. Inject Permissions in Manifest
+          MANIFEST="android/app/src/main/AndroidManifest.xml"
+          if [ -f "$MANIFEST" ]; then
+            PERMS='<uses-permission android:name="android.permission.RECORD_AUDIO" />\n    <uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.WAKE_LOCK" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />\n'
+            sed -i "s|<application|$PERMS    <application|g" "$MANIFEST"
+          fi
 
       - name: Create lib/main.dart Code
         run: |
@@ -183,7 +160,7 @@ jobs:
                       title: const Text('AI Settings & Keys'),
                       content: SingleChildScrollView(
                         child: Column(
-                          mainAxisSize: MainAxisSize.min,
+                          mainAxisSize: MinAxisSize.min,
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             const Text('Active AI Engine:', style: TextStyle(color: Colors.cyan)),
