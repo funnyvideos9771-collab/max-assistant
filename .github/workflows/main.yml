@@ -27,114 +27,6 @@ jobs:
           flutter create . --platforms=android --org com.example.max_assistant --project-name max_assistant
           flutter pub add speech_to_text flutter_tts http shared_preferences torch_light url_launcher permission_handler
 
-      - name: Inject Perfect Android Gradle & Kotlin Config
-        run: |
-          # Write correct root build.gradle with Kotlin 1.9.22
-          cat << 'EOF' > android/build.gradle
-          allprojects {
-              repositories {
-                  google()
-                  mavenCentral()
-              }
-          }
-
-          rootProject.buildDir = '../build'
-          subprojects {
-              project.buildDir = "${rootProject.buildDir}/${project.name}"
-          }
-          subprojects {
-              project.evaluationDependsOn(':app')
-          }
-
-          tasks.register("clean", Delete) {
-              delete rootProject.buildDir
-          }
-          EOF
-
-          # Write correct app/build.gradle with SDK 34 and Kotlin support
-          cat << 'EOF' > android/app/build.gradle
-          plugins {
-              id "com.android.application"
-              id "kotlin-android"
-              id "dev.flutter.flutter-plugin-loader"
-          }
-
-          android {
-              namespace "com.example.max_assistant"
-              compileSdkVersion 34
-
-              compileOptions {
-                  sourceCompatibility JavaVersion.VERSION_17
-                  targetCompatibility JavaVersion.VERSION_17
-              }
-
-              kotlinOptions {
-                  jvmTarget = '17'
-              }
-
-              defaultConfig {
-                  applicationId "com.example.max_assistant"
-                  minSdkVersion 21
-                  targetSdkVersion 34
-                  versionCode flutterVersionCode.toInteger()
-                  versionName flutterVersionName
-              }
-
-               buildTypes {
-                  release {
-                      signingConfig signingConfigs.debug
-                  }
-              }
-          }
-
-          flutter {
-              source '../..'
-          }
-
-          dependencies {
-              implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.9.22"
-          }
-          EOF
-
-          # Write correct settings.gradle
-          cat << 'EOF' > android/settings.gradle
-          pluginManagement {
-              def flutterSdkPath = {
-                  def properties = new Properties()
-                  def file = new File('local.properties')
-                  if (file.exists()) {
-                      properties.load(new FileInputStream(file))
-                  }
-                  def flutterSdkPath = properties.getProperty('flutter.sdk')
-                  assert flutterSdkPath != null, "flutter.sdk not set in local.properties"
-                  return flutterSdkPath
-              }()
-
-              includeBuild "$flutterSdkPath/packages/flutter_tools/gradle"
-
-              repositories {
-                  google()
-                  mavenCentral()
-                  gradlePluginPortal()
-              }
-          }
-
-          plugins {
-              id "dev.flutter.flutter-plugin-loader" version "1.0.0"
-              id "com.android.application" version "7.3.0" apply false
-              id "org.jetbrains.kotlin.android" version "1.9.22" apply false
-          }
-
-          include ":app"
-          EOF
-
-          # Write AndroidManifest Permissions
-          MANIFEST="android/app/src/main/AndroidManifest.xml"
-          if [ -f "$MANIFEST" ]; then
-            PERMS='<uses-permission android:name="android.permission.RECORD_AUDIO" />\n    <uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.WAKE_LOCK" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />\n    <uses-permission android:name="android.permission.CAMERA" />\n    <uses-permission android:name="android.permission.CALL_PHONE" />'
-            awk -v p="$PERMS" '/<application/{print p}1' $MANIFEST > $MANIFEST.tmp && mv $MANIFEST.tmp $MANIFEST
-          fi
-
       - name: Create lib/main.dart Code
         run: |
           mkdir -p lib
@@ -662,7 +554,7 @@ jobs:
                           ),
                         ),
                       ),
-                      const SizedBox(height: 12),
+                      The SizedBox(height: 12),
                       Text(
                         _isListening ? "Listening..." : "Tap mic or say 'Hello Power'",
                         style: const TextStyle(color: Colors.grey, fontSize: 14),
