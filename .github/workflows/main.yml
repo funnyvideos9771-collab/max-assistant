@@ -36,27 +36,29 @@ jobs:
           python3 -c "
           import os
 
-          # Fix app/build.gradle SDK versions
           if os.path.exists('$APP_GRADLE'):
               with open('$APP_GRADLE', 'r') as f:
                   content = f.read()
               content = content.replace('compileSdkVersion flutter.compileSdkVersion', 'compileSdkVersion 34')
               content = content.replace('targetSdkVersion flutter.targetSdkVersion', 'targetSdkVersion 34')
               content = content.replace('minSdkVersion flutter.minSdkVersion', 'minSdkVersion 21')
-              if 'minSdkVersion 16' in content:
-                  content = content.replace('minSdkVersion 16', 'minSdkVersion 21')
-              if 'minSdkVersion 19' in content:
-                  content = content.replace('minSdkVersion 19', 'minSdkVersion 21')
+              content = content.replace('minSdkVersion 16', 'minSdkVersion 21')
+              content = content.replace('minSdkVersion 19', 'minSdkVersion 21')
               with open('$APP_GRADLE', 'w') as f:
                   f.write(content)
 
-          # Fix root android/build.gradle Kotlin version
           if os.path.exists('$PROJECT_GRADLE'):
               with open('$PROJECT_GRADLE', 'r') as f:
                   pcontent = f.read()
-              if 'ext.kotlin_version' in pcontent:
-                  import re
-                  pcontent = re.sub(r'ext.kotlin_version\s*=\s*[\"'].*?[\"']', \"ext.kotlin_version = '1.9.22'\", pcontent)
+              if 'kotlin_version' in pcontent:
+                  lines = pcontent.splitlines()
+                  new_lines = []
+                  for line in lines:
+                      if 'kotlin_version' in line:
+                          new_lines.append(\"ext.kotlin_version = '1.9.22'\")
+                      else:
+                          new_lines.append(line)
+                  pcontent = '\n'.join(new_lines)
               else:
                   pcontent = \"buildscript { ext.kotlin_version = '1.9.22' }\\n\" + pcontent
               with open('$PROJECT_GRADLE', 'w') as f:
