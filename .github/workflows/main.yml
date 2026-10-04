@@ -27,11 +27,12 @@ jobs:
           rm -rf android
           flutter create . --platforms=android --org com.example.max_assistant --project-name max_assistant
 
-      - name: Force Kotlin 1.9.22 Version
+      - name: Force Kotlin 1.9.22 & Min SDK 21
         run: |
           python3 - << 'EOF'
           import os, re
 
+          # 1. Update Kotlin in settings.gradle
           s_file = 'android/settings.gradle'
           if os.path.exists(s_file):
               with open(s_file, 'r') as f:
@@ -40,6 +41,7 @@ jobs:
               with open(s_file, 'w') as f:
                   f.write(txt)
 
+          # 2. Update Kotlin in build.gradle
           b_file = 'android/build.gradle'
           if os.path.exists(b_file):
               with open(b_file, 'r') as f:
@@ -50,7 +52,18 @@ jobs:
                   txt = "buildscript {\n    ext.kotlin_version = '1.9.22'\n}\n" + txt
               with open(b_file, 'w') as f:
                   f.write(txt)
-          print("Kotlin version 1.9.22 successfully forced.")
+
+          # 3. Force Min SDK to 21 in app/build.gradle
+          app_b_file = 'android/app/build.gradle'
+          if os.path.exists(app_b_file):
+              with open(app_b_file, 'r') as f:
+                  txt = f.read()
+              txt = re.sub(r'minSdkVersion\s+.*', 'minSdkVersion 21', txt)
+              txt = re.sub(r'flutter\.minSdkVersion', '21', txt)
+              with open(app_b_file, 'w') as f:
+                  f.write(txt)
+
+          print("Kotlin 1.9.22 and Min SDK 21 successfully updated.")
           EOF
 
       - name: Install dependencies
