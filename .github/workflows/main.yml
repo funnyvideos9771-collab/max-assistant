@@ -36,6 +36,7 @@ jobs:
           python3 -c "
           import os
 
+          # 1. Fix app/build.gradle SDK versions
           if os.path.exists('$APP_GRADLE'):
               with open('$APP_GRADLE', 'r') as f:
                   content = f.read()
@@ -47,24 +48,31 @@ jobs:
               with open('$APP_GRADLE', 'w') as f:
                   f.write(content)
 
+          # 2. Force set Kotlin version in root android/build.gradle
           if os.path.exists('$PROJECT_GRADLE'):
               with open('$PROJECT_GRADLE', 'r') as f:
                   pcontent = f.read()
-              if 'kotlin_version' in pcontent:
+              
+              if 'ext.kotlin_version' in pcontent:
                   lines = pcontent.splitlines()
                   new_lines = []
                   for line in lines:
-                      if 'kotlin_version' in line:
-                          new_lines.append(\"ext.kotlin_version = '1.9.22'\")
+                      if 'ext.kotlin_version' in line:
+                          new_lines.append(\"    ext.kotlin_version = '1.9.22'\")
                       else:
                           new_lines.append(line)
                   pcontent = '\n'.join(new_lines)
               else:
-                  pcontent = \"buildscript { ext.kotlin_version = '1.9.22' }\\n\" + pcontent
+                  # If buildscript block exists, inject inside it, else prepend
+                  if 'buildscript {' in pcontent:
+                      pcontent = pcontent.replace('buildscript {', \"buildscript {\\n    ext.kotlin_version = '1.9.22'\")
+                  else:
+                      pcontent = \"buildscript {\\n    ext.kotlin_version = '1.9.22'\\n}\\n\" + pcontent
+
               with open('$PROJECT_GRADLE', 'w') as f:
                   f.write(pcontent)
 
-          print('Successfully updated Gradle and Kotlin versions!')
+          print('Successfully patched Gradle and Kotlin versions!')
           "
 
           MANIFEST="android/app/src/main/AndroidManifest.xml"
@@ -281,7 +289,7 @@ jobs:
                 }
                 return true;
               } else if (text.contains("youtube") && (text.contains("chalao") || text.contains("open") || text.contains("play"))) {
-                String query = text.replaceAll("youtube", "").replaceAll("par", "").replaceAll("funny videos", "funny videos").replaceAll("chalao", "").replaceAll("play", "").replaceAll("open", "").trim();
+                String query = text.replaceAll("youtube", "").replaceAll("par", "").replaceAll("chalao", "").replaceAll("play", "").replaceAll("open", "").trim();
                 String url = query.isNotEmpty
                     ? "https://www.youtube.com/results?search_query=${Uri.encodeComponent(query)}"
                     : "https://www.youtube.com";
@@ -416,7 +424,7 @@ jobs:
                   }
                 } else if (_selectedProvider == "ChatGPT") {
                   if (_chatgptKey.isEmpty) {
-                    _speakAndShow("Settings (⚙️) me ChatGPT API Key daalein.");
+                    _speakAndShow("Settings (⚙️️) me ChatGPT API Key daalein.");
                     return;
                   }
                   final url = Uri.parse('https://api.openai.com/v1/chat/completions');
@@ -528,7 +536,7 @@ jobs:
                         ),
                       const Spacer(),
                       
-                      // Animated Jarvis Glowing Visualizer
+                      # Animated Jarvis Glowing Visualizer
                       AnimatedBuilder(
                         animation: _animController,
                         builder: (context, child) {
