@@ -24,14 +24,11 @@ jobs:
 
       - name: Clean & Re-create Android Setup
         run: |
-          rm -rf android
+          rm -rf android lib
           flutter create . --platforms=android --org com.example.max_assistant --project-name max_assistant
-
-      - name: Add Required Flutter Packages
-        run: |
           flutter pub add speech_to_text flutter_tts http shared_preferences
 
-      - name: Configure Android Permissions and Update main.dart
+      - name: Configure Android Permissions and Gradle
         run: |
           python3 - << 'EOF'
           import os, re
@@ -67,19 +64,29 @@ jobs:
               with open(app_b_file, 'w') as f:
                   f.write(txt)
 
-          # 4. Inject permissions into AndroidManifest.xml
+          # 4. Inject Background & Record Permissions
           m_file = 'android/app/src/main/AndroidManifest.xml'
           if os.path.exists(m_file):
               with open(m_file, 'r') as f:
                   txt = f.read()
               if 'RECORD_AUDIO' not in txt:
-                  perms = '    <uses-permission android:name="android.permission.RECORD_AUDIO" />\n    <uses-permission android:name="android.permission.INTERNET" />\n'
+                  perms = '''    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+      <uses-permission android:name="android.permission.INTERNET" />
+      <uses-permission android:name="android.permission.WAKE_LOCK" />
+      <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+  '''
                   txt = txt.replace('<application', perms + '    <application')
                   with open(m_file, 'w') as f:
                       f.write(txt)
 
-          # 5. Overwrite lib/main.dart with Full Gemini AI Power & Key Settings
-          main_dart = """import 'package:flutter/material.dart';
+          print("Gradle and Manifest configured successfully.")
+          EOF
+
+      - name: Generate Multi-AI lib/main.dart Code
+        run: |
+          mkdir -p lib
+          cat << 'EOF' > lib/main.dart
+          import 'package:flutter/material.dart';
           import 'package:speech_to_text/speech_to_text.dart' as stt;
           import 'package:flutter_tts/flutter_tts.dart';
           import 'package:http/http.dart' as http;
@@ -119,9 +126,14 @@ jobs:
             late FlutterTts _flutterTts;
             bool _isListening = false;
             bool _isLoading = false;
+            bool _standbyMode = false;
             String _userSpeech = "";
-            String _aiResponse = "Tap mic and ask anything!";
-            String _apiKey = "";
+            String _aiResponse = "Tap mic or say 'Hello Power' in Standby Mode!";
+
+            String _selectedProvider = "Gemini";
+            String _geminiKey = "";
+            String _chatgptKey = "";
+            String _claudeKey = "";
 
             @override
             void initState() {
@@ -129,7 +141,7 @@ jobs:
               _speech = stt.SpeechToText();
               _flutterTts = FlutterTts();
               _initTts();
-              _loadApiKey();
+              _loadApiSettings();
             }
 
             void _initTts() async {
@@ -138,133 +150,266 @@ jobs:
               await _flutterTts.setSpeechRate(0.5);
             }
 
-            void _loadApiKey() async {
+            void _loadApiSettings() async {
               SharedPreferences prefs = await SharedPreferences.getInstance();
               setState(() {
-                _apiKey = prefs.getString('gemini_api_key') ?? "";
+                _selectedProvider = prefs.getString('selected_provider') ?? "Gemini";
+                _geminiKey = prefs.getString('gemini_api_key') ?? "";
+                _chatgptKey = prefs.getString('chatgpt_api_key') ?? "";
+                _claudeKey = prefs.getString('claude_api_key') ?? "";
               });
             }
 
-            void _saveApiKey(String key) async {
+            void _saveApiSettings(String provider, String gKey, String cKey, String clKey) async {
               SharedPreferences prefs = await SharedPreferences.getInstance();
-              await prefs.setString('gemini_api_key', key);
+              await prefs.setString('selected_provider', provider);
+              await prefs.setString('gemini_api_key', gKey);
+              await prefs.setString('chatgpt_api_key', cKey);
+              await prefs.setString('claude_api_key', clKey);
               setState(() {
-                _apiKey = key;
+                _selectedProvider = provider;
+                _geminiKey = gKey;
+                _chatgptKey = cKey;
+                _claudeKey = clKey;
               });
             }
 
-            void _showApiKeyDialog() {
-              TextEditingController controller = TextEditingController(text: _apiKey);
+            void _showSettingsDialog() {
+              String tempProvider = _selectedProvider;
+              TextEditingController gController = TextEditingController(text: _geminiKey);
+              TextEditingController cController = TextEditingController(text: _chatgptKey);
+              TextEditingController clController = TextEditingController(text: _claudeKey);
+
               showDialog(
                 context: context,
-                builder: (context) => AlertDialog(
-                  backgroundColor: const Color(0xFF1E293B),
-                  title: const Text('Enter Gemini API Key'),
-                  content: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Text(
-                        'Get a free API Key from Google AI Studio (aistudio.google.com)',
-                        style: TextStyle(fontSize: 12, color: Colors.grey),
-                      ),
-                      const SizedBox(height: 10),
-                      TextField(
-                        controller: controller,
-                        decoration: const InputDecoration(
-                          hintText: 'Paste AI API Key here',
-                          border: OutlineInputBorder(),
+                builder: (context) => StatefulBuilder(
+                  builder: (context, setDialogState) {
+                    return AlertDialog(
+                      backgroundColor: const Color(0xFF1E293B),
+                      title: const Text('AI Settings & Keys'),
+                      content: SingleChildScrollView(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text('Active AI Engine:', style: TextStyle(color: Colors.cyan)),
+                            DropdownButton<String>(
+                              value: tempProvider,
+                              isExpanded: true,
+                              dropdownColor: const Color(0xFF0F172A),
+                              items: ['Gemini', 'ChatGPT', 'Claude']
+                                  .map((e) => DropdownMenuItem(value: e, child: Text(e)))
+                                  .toList(),
+                              onChanged: (val) {
+                                if (val != null) {
+                                  setDialogState(() => tempProvider = val);
+                                }
+                              },
+                            ),
+                            const SizedBox(height: 15),
+                            const Text('Google Gemini API Key:', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                            TextField(
+                              controller: gController,
+                              decoration: const InputDecoration(hintText: 'Paste Gemini Key', isDense: true),
+                            ),
+                            const SizedBox(height: 10),
+                            const Text('OpenAI ChatGPT API Key:', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                            TextField(
+                              controller: cController,
+                              decoration: const InputDecoration(hintText: 'Paste OpenAI Key', isDense: true),
+                            ),
+                            const SizedBox(height: 10),
+                            const Text('Anthropic Claude API Key:', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                            TextField(
+                              controller: clController,
+                              decoration: const InputDecoration(hintText: 'Paste Claude Key', isDense: true),
+                            ),
+                          ],
                         ),
                       ),
-                    ],
-                  ),
-                  actions: [
-                    TextButton(
-                      onPressed: () => Navigator.pop(context),
-                      child: const Text('Cancel'),
-                    ),
-                    ElevatedButton(
-                      onPressed: () {
-                        _saveApiKey(controller.text.trim());
-                        Navigator.pop(context);
-                      },
-                      child: const Text('Save Key'),
-                    ),
-                  ],
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(context),
+                          child: const Text('Cancel'),
+                        ),
+                        ElevatedButton(
+                          onPressed: () {
+                            _saveApiSettings(
+                              tempProvider,
+                              gController.text.trim(),
+                              cController.text.trim(),
+                              clController.text.trim(),
+                            );
+                            Navigator.pop(context);
+                          },
+                          child: const Text('Save Settings'),
+                        ),
+                      ],
+                    );
+                  },
                 ),
               );
             }
 
-            void _listen() async {
-              if (!_isListening) {
-                bool available = await _speech.initialize(
-                  onStatus: (val) {
-                    if (val == 'done' || val == 'notListening') {
-                      setState(() => _isListening = false);
-                      if (_userSpeech.isNotEmpty) {
-                        _getAiResponse(_userSpeech);
-                      }
+            void _toggleStandbyMode() {
+              setState(() {
+                _standbyMode = !_standbyMode;
+              });
+              if (_standbyMode) {
+                _speakAndShow("Standby mode ON! Aab 'Hello Power' boliye.");
+                _startContinuousListening();
+              } else {
+                _speech.stop();
+                setState(() => _isListening = false);
+                _speakAndShow("Standby mode OFF.");
+              }
+            }
+
+            void _startContinuousListening() async {
+              bool available = await _speech.initialize(
+                onStatus: (val) {
+                  if ((val == 'done' || val == 'notListening') && _standbyMode) {
+                    _startContinuousListening();
+                  }
+                },
+                onError: (val) {
+                  if (_standbyMode) {
+                    Future.delayed(const Duration(seconds: 1), () => _startContinuousListening());
+                  }
+                },
+              );
+
+              if (available) {
+                setState(() => _isListening = true);
+                _speech.listen(
+                  onResult: (val) {
+                    String recognized = val.recognizedWords.toLowerCase();
+                    setState(() {
+                      _userSpeech = val.recognizedWords;
+                    });
+
+                    if (recognized.contains("hello power") || recognized.contains("power")) {
+                      _speech.stop();
+                      _speakAndShow("Haan ji, main sun raha hu! Boliye kya madad karu?");
+                      Future.delayed(const Duration(seconds: 2), () => _listenOnce());
+                    } else if (!_standbyMode && recognized.isNotEmpty) {
+                      _getAiResponse(val.recognizedWords);
                     }
                   },
-                  onError: (val) => setState(() => _isListening = false),
                 );
-                if (available) {
-                  setState(() {
-                    _isListening = true;
-                    _userSpeech = "";
-                    _aiResponse = "Listening... Bolna shuru karein";
-                  });
-                  _speech.listen(
-                    onResult: (val) => setState(() {
-                      _userSpeech = val.recognizedWords;
-                    }),
-                  );
-                }
-              } else {
-                setState(() => _isListening = false);
-                _speech.stop();
+              }
+            }
+
+            void _listenOnce() async {
+              bool available = await _speech.initialize(
+                onStatus: (val) {
+                  if (val == 'done' || val == 'notListening') {
+                    setState(() => _isListening = false);
+                    if (_userSpeech.isNotEmpty && !_userSpeech.toLowerCase().contains("hello power")) {
+                      _getAiResponse(_userSpeech);
+                    }
+                  }
+                },
+                onError: (val) => setState(() => _isListening = false),
+              );
+
+              if (available) {
+                setState(() {
+                  _isListening = true;
+                  _userSpeech = "";
+                  _aiResponse = "Listening... Bolna shuru karein";
+                });
+                _speech.listen(
+                  onResult: (val) => setState(() {
+                    _userSpeech = val.recognizedWords;
+                  }),
+                );
               }
             }
 
             Future<void> _getAiResponse(String prompt) async {
               setState(() {
                 _isLoading = true;
-                _aiResponse = "Thinking...";
+                _aiResponse = "Soch raha hu ($_selectedProvider)...";
               });
 
               try {
-                if (_apiKey.isEmpty) {
-                  _speakAndShow("Kripya App Settings (⚙️) me jakar Gemini API Key daalein taaki main har sawaal ka jawab de saku!");
-                  return;
-                }
-
-                final url = Uri.parse(
-                    'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$_apiKey');
-
-                final response = await http.post(
-                  url,
-                  headers: {'Content-Type': 'application/json'},
-                  body: jsonEncode({
-                    "contents": [
-                      {
-                        "parts": [
-                          {
-                            "text": "Aap Max AI hain, ek smart AI Assistant. Is sawaal ka short, clear aur helpful Hindi/Hinglish me jawab dein: $prompt"
-                          }
-                        ]
-                      }
-                    ]
-                  }),
-                );
-
-                if (response.statusCode == 200) {
-                  final data = jsonDecode(response.body);
-                  String text = data['candidates'][0]['content']['parts'][0]['text'];
-                  _speakAndShow(text.trim());
-                } else {
-                  _speakAndShow("API Key galat hai ya limit khatam ho gayi hai. Kripya settings check karein.");
+                if (_selectedProvider == "Gemini") {
+                  if (_geminiKey.isEmpty) {
+                    _speakAndShow("Settings (⚙️) me Gemini API Key daalein.");
+                    return;
+                  }
+                  final url = Uri.parse('https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$_geminiKey');
+                  final res = await http.post(
+                    url,
+                    headers: {'Content-Type': 'application/json'},
+                    body: jsonEncode({
+                      "contents": [
+                        {"parts": [{"text": "Short & natural Hindi answer: $prompt"}]}
+                      ]
+                    }),
+                  );
+                  if (res.statusCode == 200) {
+                    final data = jsonDecode(res.body);
+                    _speakAndShow(data['candidates'][0]['content']['parts'][0]['text'].toString().trim());
+                  } else {
+                    _speakAndShow("Gemini API Error. Key check karein.");
+                  }
+                } else if (_selectedProvider == "ChatGPT") {
+                  if (_chatgptKey.isEmpty) {
+                    _speakAndShow("Settings (⚙️) me ChatGPT API Key daalein.");
+                    return;
+                  }
+                  final url = Uri.parse('https://api.openai.com/v1/chat/completions');
+                  final res = await http.post(
+                    url,
+                    headers: {
+                      'Content-Type': 'application/json',
+                      'Authorization': 'Bearer $_chatgptKey'
+                    },
+                    body: jsonEncode({
+                      "model": "gpt-3.5-turbo",
+                      "messages": [
+                        {"role": "user", "content": "Short & natural Hindi answer: $prompt"}
+                      ]
+                    }),
+                  );
+                  if (res.statusCode == 200) {
+                    final data = jsonDecode(res.body);
+                    _speakAndShow(data['choices'][0]['message']['content'].toString().trim());
+                  } else {
+                    _speakAndShow("ChatGPT API Error. Key check karein.");
+                  }
+                } else if (_selectedProvider == "Claude") {
+                  if (_claudeKey.isEmpty) {
+                    _speakAndShow("Settings (⚙️) me Claude API Key daalein.");
+                    return;
+                  }
+                  final url = Uri.parse('https://api.anthropic.com/v1/messages');
+                  final res = await http.post(
+                    url,
+                    headers: {
+                      'Content-Type': 'application/json',
+                      'x-api-key': _claudeKey,
+                      'anthropic-version': '2023-06-01'
+                    },
+                    body: jsonEncode({
+                      "model": "claude-3-haiku-20240307",
+                      "max_tokens": 300,
+                      "messages": [
+                        {"role": "user", "content": "Short & natural Hindi answer: $prompt"}
+                      ]
+                    }),
+                  );
+                  if (res.statusCode == 200) {
+                    final data = jsonDecode(res.body);
+                    _speakAndShow(data['content'][0]['text'].toString().trim());
+                  } else {
+                    _speakAndShow("Claude API Error. Key check karein.");
+                  }
                 }
               } catch (e) {
-                _speakAndShow("Internet connect nahi ho pa raha hai. Dobara try karein.");
+                _speakAndShow("Internet connection error.");
               }
             }
 
@@ -281,17 +426,14 @@ jobs:
             Widget build(BuildContext context) {
               return Scaffold(
                 appBar: AppBar(
-                  title: const Text('MAX AI ASSISTANT'),
+                  title: Text('MAX AI ($_selectedProvider)'),
                   centerTitle: true,
                   backgroundColor: Colors.transparent,
                   elevation: 0,
                   actions: [
                     IconButton(
-                      icon: Icon(
-                        Icons.settings,
-                        color: _apiKey.isNotEmpty ? Colors.cyan : Colors.orange,
-                      ),
-                      onPressed: _showApiKeyDialog,
+                      icon: const Icon(Icons.settings, color: Colors.cyan),
+                      onPressed: _showSettingsDialog,
                     )
                   ],
                 ),
@@ -299,24 +441,21 @@ jobs:
                   padding: const EdgeInsets.all(24.0),
                   child: Column(
                     children: [
-                      if (_apiKey.isEmpty)
-                        Container(
-                          padding: const EdgeInsets.all(8),
-                          margin: const EdgeInsets.bottom(12),
-                          decoration: BoxDecoration(
-                            color: Colors.orange.withOpacity(0.2),
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: Colors.orange),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Text("Standby Wake Mode ('Hello Power'): "),
+                          Switch(
+                            value: _standbyMode,
+                            activeColor: Colors.cyan,
+                            onChanged: (val) => _toggleStandbyMode(),
                           ),
-                          child: const Text(
-                            "⚠️ Top-Right Settings (⚙️) icon par click karke Free Gemini API Key daalein!",
-                            style: TextStyle(color: Colors.orange, fontSize: 13),
-                            textAlign: TextAlign.center,
-                          ),
-                        ),
+                        ],
+                      ),
                       if (_userSpeech.isNotEmpty)
                         Container(
                           padding: const EdgeInsets.all(12),
+                          margin: const EdgeInsets.only(top: 8),
                           decoration: BoxDecoration(
                             color: Colors.white10,
                             borderRadius: BorderRadius.circular(12),
@@ -360,7 +499,7 @@ jobs:
                             ),
                       const Spacer(),
                       GestureDetector(
-                        onTap: _listen,
+                        onTap: _listenOnce,
                         child: CircleAvatar(
                           radius: 40,
                           backgroundColor: _isListening ? Colors.redAccent : Colors.cyan,
@@ -373,7 +512,7 @@ jobs:
                       ),
                       const SizedBox(height: 12),
                       Text(
-                        _isListening ? "Listening... Tap to stop" : "Tap mic and ask anything",
+                        _isListening ? "Listening..." : "Tap mic or say 'Hello Power'",
                         style: const TextStyle(color: Colors.grey, fontSize: 14),
                       ),
                       const SizedBox(height: 20),
@@ -383,13 +522,6 @@ jobs:
               );
             }
           }
-          """
-
-          os.makedirs('lib', exist_ok=True)
-          with open('lib/main.dart', 'w') as f:
-              f.write(main_dart)
-
-          print("App updated with Gemini AI & Settings support.")
           EOF
 
       - name: Install dependencies
