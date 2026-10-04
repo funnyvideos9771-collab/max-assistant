@@ -28,15 +28,13 @@ jobs:
           flutter create . --platforms=android --org com.example.max_assistant --project-name max_assistant
           flutter pub add speech_to_text flutter_tts http shared_preferences torch_light url_launcher permission_handler
 
-      - name: Permanent Kotlin & Gradle Fix for Modern Android
+      - name: Clean Gradle and Fix Configuration
         run: |
-          # 1. Force update gradle-wrapper.properties to use a stable Gradle version (8.4)
           WRAPPER_PROP="android/gradle/wrapper/gradle-wrapper.properties"
           if [ -f "$WRAPPER_PROP" ]; then
             echo "distributionUrl=https\://services.gradle.org/distributions/gradle-8.4-bin.zip" > "$WRAPPER_PROP"
           fi
 
-          # 2. Fix settings.gradle to use Kotlin 1.9.22 plugin properly
           SETTINGS_GRADLE="android/settings.gradle"
           if [ -f "$SETTINGS_GRADLE" ]; then
             cat << 'EOF' > "$SETTINGS_GRADLE"
@@ -71,23 +69,22 @@ jobs:
           EOF
           fi
 
-          # 3. Fix app/build.gradle SDK versions and dependencies
           APP_GRADLE="android/app/build.gradle"
           if [ -f "$APP_GRADLE" ]; then
             python3 -c "
-            with open('$APP_GRADLE', 'r') as f:
+            path = 'android/app/build.gradle'
+            with open(path, 'r') as f:
                 content = f.read()
             content = content.replace('compileSdkVersion flutter.compileSdkVersion', 'compileSdkVersion 34')
             content = content.replace('targetSdkVersion flutter.targetSdkVersion', 'targetSdkVersion 34')
             content = content.replace('minSdkVersion flutter.minSdkVersion', 'minSdkVersion 21')
             content = content.replace('minSdkVersion 16', 'minSdkVersion 21')
             content = content.replace('minSdkVersion 19', 'minSdkVersion 21')
-            with open('$APP_GRADLE', 'w') as f:
+            with open(path, 'w') as f:
                 f.write(content)
             "
           fi
 
-          # 4. AndroidManifest Permissions
           MANIFEST="android/app/src/main/AndroidManifest.xml"
           if [ -f "$MANIFEST" ]; then
             PERMS='<uses-permission android:name="android.permission.RECORD_AUDIO" />\n    <uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.WAKE_LOCK" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />\n    <uses-permission android:name="android.permission.CAMERA" />\n    <uses-permission android:name="android.permission.CALL_PHONE" />'
