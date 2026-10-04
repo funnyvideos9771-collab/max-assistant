@@ -27,6 +27,11 @@ jobs:
           rm -rf android
           flutter create . --platforms=android --org com.example.max_assistant --project-name max_assistant
 
+      - name: Update Kotlin Version
+        run: |
+          sed -i 's/1.8.22/1.9.22/g' android/settings.gradle 2>/dev/null || true
+          sed -i 's/ext.kotlin_version = .*/ext.kotlin_version = "1.9.22"/g' android/build.gradle 2>/dev/null || true
+
       - name: Install dependencies
         run: flutter pub get
 
