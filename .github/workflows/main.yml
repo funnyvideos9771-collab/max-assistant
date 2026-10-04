@@ -24,34 +24,21 @@ jobs:
 
       - name: Re-create Clean Flutter Project
         run: |
-          rm -rf android lib
+          rm -rf android lib pubspec.yaml
           flutter create . --platforms=android --org com.example.max_assistant --project-name max_assistant
           flutter pub add speech_to_text flutter_tts http shared_preferences
 
-      - name: Configure Android Permissions and Gradle
+      - name: Update Android Permissions and MinSDK
         run: |
-          # 1. Update settings.gradle (Kotlin 1.9.22)
-          if [ -f "android/settings.gradle" ]; then
-            sed -i -E 's/org\.jetbrains\.kotlin\.android" version "[^"]+"/org.jetbrains.kotlin.android" version "1.9.22"/g' android/settings.gradle
-          fi
-
-          # 2. Update build.gradle
-          if [ -f "android/build.gradle" ]; then
-            sed -i "s/ext.kotlin_version = .*/ext.kotlin_version = '1.9.22'/g" android/build.gradle
-          fi
-
-          # 3. Update app/build.gradle (minSdkVersion 21)
-          if [ -f "android/app/build.gradle" ]; then
-            sed -i 's/minSdkVersion .*/minSdkVersion 21/g' android/app/build.gradle
-            sed -i 's/flutter.minSdkVersion/21/g' android/app/build.gradle
-          fi
-
-          # 4. Inject Permissions in Manifest
           MANIFEST="android/app/src/main/AndroidManifest.xml"
-          if [ -f "$MANIFEST" ]; then
-            PERMS='<uses-permission android:name="android.permission.RECORD_AUDIO" />\n    <uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.WAKE_LOCK" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />\n'
-            sed -i "s|<application|$PERMS    <application|g" "$MANIFEST"
-          fi
+          PERMS='<uses-permission android:name="android.permission.RECORD_AUDIO" />\n    <uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.WAKE_LOCK" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />'
+          awk -v p="$PERMS" '/<application/{print p}1' $MANIFEST > $MANIFEST.tmp && mv $MANIFEST.tmp $MANIFEST
+          
+          # Set minSdkVersion to 21 for speech recognition
+          GRADLE="android/app/build.gradle"
+          sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 21/g' $GRADLE || true
+          sed -i 's/minSdkVersion 16/minSdkVersion 21/g' $GRADLE || true
+          sed -i 's/minSdkVersion 19/minSdkVersion 21/g' $GRADLE || true
 
       - name: Create lib/main.dart Code
         run: |
@@ -160,7 +147,7 @@ jobs:
                       title: const Text('AI Settings & Keys'),
                       content: SingleChildScrollView(
                         child: Column(
-                          mainAxisSize: MinAxisSize.min,
+                          mainAxisSize: MainAxisSize.min,
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             const Text('Active AI Engine:', style: TextStyle(color: Colors.cyan)),
