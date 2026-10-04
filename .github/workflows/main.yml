@@ -32,7 +32,7 @@ jobs:
           python3 - << 'EOF'
           import os, re
 
-          # 1. Update settings.gradle
+          # 1. Update settings.gradle (Kotlin 1.9.22)
           s_file = 'android/settings.gradle'
           if os.path.exists(s_file):
               with open(s_file, 'r') as f:
@@ -63,47 +63,18 @@ jobs:
               with open(app_b_file, 'w') as f:
                   f.write(txt)
 
-          # 4. Write clean AndroidManifest.xml with Microphone Permissions
-          manifest_content = '''<manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <uses-permission android:name="android.permission.RECORD_AUDIO"/>
-    <uses-permission android:name="android.permission.INTERNET"/>
-    <uses-permission android:name="android.permission.BLUETOOTH"/>
-    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN"/>
-    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
-
-    <application
-        android:label="max_assistant"
-        android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
-        <activity
-            android:name=".MainActivity"
-            android:exported="true"
-            android:launchMode="singleTop"
-            android:theme="@style/LaunchTheme"
-            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
-            android:hardwareAccelerated="true"
-            android:windowSoftInputMode="adjustResize">
-            <meta-data
-              android:name="io.flutter.embedding.android.NormalTheme"
-              android:resource="@style/NormalTheme"
-              />
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN"/>
-                <category android:name="android.intent.category.LAUNCHER"/>
-            </intent-filter>
-        </activity>
-        <meta-data
-            android:name="flutterEmbedding"
-            android:value="2" />
-    </application>
-</manifest>
-'''
+          # 4. Inject permissions into existing AndroidManifest.xml
           m_file = 'android/app/src/main/AndroidManifest.xml'
           if os.path.exists(m_file):
-              with open(m_file, 'w') as f:
-                  f.write(manifest_content)
+              with open(m_file, 'r') as f:
+                  txt = f.read()
+              if 'RECORD_AUDIO' not in txt:
+                  perms = '    <uses-permission android:name="android.permission.RECORD_AUDIO" />\n    <uses-permission android:name="android.permission.INTERNET" />\n'
+                  txt = txt.replace('<application', perms + '    <application')
+                  with open(m_file, 'w') as f:
+                      f.write(txt)
 
-          print("Configuration and Manifest updated successfully.")
+          print("Setup configured successfully.")
           EOF
 
       - name: Install dependencies
