@@ -27,7 +27,7 @@ jobs:
           rm -rf android
           flutter create . --platforms=android --org com.example.max_assistant --project-name max_assistant
 
-      - name: Force Kotlin 1.9.22, Min SDK 21 & Fixed Manifest Permissions
+      - name: Configure Android Permissions and Gradle
         run: |
           python3 - << 'EOF'
           import os, re
@@ -53,7 +53,7 @@ jobs:
               with open(b_file, 'w') as f:
                   f.write(txt)
 
-          # 3. App build.gradle (Min SDK 21)
+          # 3. Update app/build.gradle (minSdkVersion 21)
           app_b_file = 'android/app/build.gradle'
           if os.path.exists(app_b_file):
               with open(app_b_file, 'r') as f:
@@ -63,26 +63,47 @@ jobs:
               with open(app_b_file, 'w') as f:
                   f.write(txt)
 
-          # 4. Correctly insert Permissions into AndroidManifest.xml before <application>
+          # 4. Write clean AndroidManifest.xml with Microphone Permissions
+          manifest_content = '''<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+    <uses-permission android:name="android.permission.INTERNET"/>
+    <uses-permission android:name="android.permission.BLUETOOTH"/>
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN"/>
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
+
+    <application
+        android:label="max_assistant"
+        android:name="${applicationName}"
+        android:icon="@mipmap/ic_launcher">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:theme="@style/LaunchTheme"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+            android:hardwareAccelerated="true"
+            android:windowSoftInputMode="adjustResize">
+            <meta-data
+              android:name="io.flutter.embedding.android.NormalTheme"
+              android:resource="@style/NormalTheme"
+              />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity>
+        <meta-data
+            android:name="flutterEmbedding"
+            android:value="2" />
+    </application>
+</manifest>
+'''
           m_file = 'android/app/src/main/AndroidManifest.xml'
           if os.path.exists(m_file):
-              with open(m_file, 'r') as f:
-                  txt = f.read()
-              
-              perms = '''
-      <uses-permission android:name="android.permission.RECORD_AUDIO"/>
-      <uses-permission android:name="android.permission.INTERNET"/>
-      <uses-permission android:name="android.permission.BLUETOOTH"/>
-      <uses-permission android:name="android.permission.BLUETOOTH_ADMIN"/>
-      <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
-  '''
-              if '<application' in txt:
-                  txt = txt.replace('<application', perms + '\n    <application')
-              
               with open(m_file, 'w') as f:
-                  f.write(txt)
+                  f.write(manifest_content)
 
-          print("Permissions and Gradle configurations fixed cleanly.")
+          print("Configuration and Manifest updated successfully.")
           EOF
 
       - name: Install dependencies
