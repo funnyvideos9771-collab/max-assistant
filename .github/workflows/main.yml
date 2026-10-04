@@ -26,19 +26,32 @@ jobs:
         run: |
           rm -rf android lib pubspec.yaml
           flutter create . --platforms=android --org com.example.max_assistant --project-name max_assistant
-          flutter pub add speech_to_text flutter_tts http shared_preferences
+          flutter pub add speech_to_text flutter_tts http shared_preferences torch_light url_launcher flutter_contacts permission_handler
 
-      - name: Update Android Permissions and MinSDK
+      - name: Configure Gradle & Kotlin Compatibility
         run: |
+          GRADLE_BUILD="android/build.gradle"
+          if [ -f "$GRADLE_BUILD" ]; then
+            sed -i "s/ext.kotlin_version = .*/ext.kotlin_version = '1.9.22'/g" $GRADLE_BUILD || true
+          fi
+
+          SETTINGS_GRADLE="android/settings.gradle"
+          if [ -f "$SETTINGS_GRADLE" ]; then
+            sed -i -E 's/org\.jetbrains\.kotlin\.android" version "[^"]+"/org.jetbrains.kotlin.android" version "1.9.22"/g' $SETTINGS_GRADLE || true
+          fi
+
+          APP_GRADLE="android/app/build.gradle"
+          if [ -f "$APP_GRADLE" ]; then
+            sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 21/g' $APP_GRADLE || true
+            sed -i 's/minSdkVersion 16/minSdkVersion 21/g' $APP_GRADLE || true
+            sed -i 's/minSdkVersion 19/minSdkVersion 21/g' $APP_GRADLE || true
+          fi
+
           MANIFEST="android/app/src/main/AndroidManifest.xml"
-          PERMS='<uses-permission android:name="android.permission.RECORD_AUDIO" />\n    <uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.WAKE_LOCK" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />'
-          awk -v p="$PERMS" '/<application/{print p}1' $MANIFEST > $MANIFEST.tmp && mv $MANIFEST.tmp $MANIFEST
-          
-          # Set minSdkVersion to 21 for speech recognition
-          GRADLE="android/app/build.gradle"
-          sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 21/g' $GRADLE || true
-          sed -i 's/minSdkVersion 16/minSdkVersion 21/g' $GRADLE || true
-          sed -i 's/minSdkVersion 19/minSdkVersion 21/g' $GRADLE || true
+          if [ -f "$MANIFEST" ]; then
+            PERMS='<uses-permission android:name="android.permission.RECORD_AUDIO" />\n    <uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.WAKE_LOCK" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />\n    <uses-permission android:name="android.permission.CAMERA" />\n    <uses-permission android:name="android.permission.CALL_PHONE" />\n    <uses-permission android:name="android.permission.READ_CONTACTS" />'
+            awk -v p="$PERMS" '/<application/{print p}1' $MANIFEST > $MANIFEST.tmp && mv $MANIFEST.tmp $MANIFEST
+          fi
 
       - name: Create lib/main.dart Code
         run: |
@@ -49,7 +62,11 @@ jobs:
           import 'package:flutter_tts/flutter_tts.dart';
           import 'package:http/http.dart' as http;
           import 'package:shared_preferences/shared_preferences.dart';
+          import 'package:torch_light/torch_light.dart';
+          import 'package:url_launcher/url_launcher.dart';
+          import 'package:permission_handler/permission_handler.dart';
           import 'dart:convert';
+          import 'dart:math' as math;
 
           void main() {
             runApp(const MaxAiApp());
@@ -62,10 +79,10 @@ jobs:
             Widget build(BuildContext context) {
               return MaterialApp(
                 debugShowCheckedModeBanner: false,
-                title: 'Max AI Assistant',
+                title: 'Max AI Jarvis Assistant',
                 theme: ThemeData.dark().copyWith(
-                  scaffoldBackgroundColor: const Color(0xFF0F172A),
-                  colorScheme: const ColorScheme.dark(primary: Colors.cyan),
+                  scaffoldBackgroundColor: const Color(0xFF070B19),
+                  colorScheme: const ColorScheme.dark(primary: Colors.cyanAccent),
                 ),
                 home: const HomeScreen(),
               );
@@ -79,9 +96,11 @@ jobs:
             State<HomeScreen> createState() => _HomeScreenState();
           }
 
-          class _HomeScreenState extends State<HomeScreen> {
+          class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             late stt.SpeechToText _speech;
             late FlutterTts _flutterTts;
+            late AnimationController _animController;
+
             bool _isListening = false;
             bool _isLoading = false;
             bool _standbyMode = false;
@@ -92,14 +111,38 @@ jobs:
             String _geminiKey = "";
             String _chatgptKey = "";
             String _claudeKey = "";
+            String _elevenLabsKey = "";
+
+            final String _aiContextMemory = "Your name is Max, a smart voice assistant. User's name is Sonu. Sonu's best friend is Junu. Speak short, friendly Hindi/Hinglish answers.";
 
             @override
             void initState() {
               super.initState();
               _speech = stt.SpeechToText();
               _flutterTts = FlutterTts();
+              _animController = AnimationController(
+                vsync: this,
+                duration: const Duration(seconds: 2),
+              )..repeat();
+
               _initTts();
               _loadApiSettings();
+              _requestPermissions();
+            }
+
+            @override
+            void dispose() {
+              _animController.dispose();
+              super.dispose();
+            }
+
+            void _requestPermissions() async {
+              await [
+                Permission.microphone,
+                Permission.camera,
+                Permission.phone,
+                Permission.contacts,
+              ].request();
             }
 
             void _initTts() async {
@@ -115,20 +158,23 @@ jobs:
                 _geminiKey = prefs.getString('gemini_api_key') ?? "";
                 _chatgptKey = prefs.getString('chatgpt_api_key') ?? "";
                 _claudeKey = prefs.getString('claude_api_key') ?? "";
+                _elevenLabsKey = prefs.getString('elevenlabs_api_key') ?? "";
               });
             }
 
-            void _saveApiSettings(String provider, String gKey, String cKey, String clKey) async {
+            void _saveApiSettings(String provider, String gKey, String cKey, String clKey, String eKey) async {
               SharedPreferences prefs = await SharedPreferences.getInstance();
               await prefs.setString('selected_provider', provider);
               await prefs.setString('gemini_api_key', gKey);
               await prefs.setString('chatgpt_api_key', cKey);
               await prefs.setString('claude_api_key', clKey);
+              await prefs.setString('elevenlabs_api_key', eKey);
               setState(() {
                 _selectedProvider = provider;
                 _geminiKey = gKey;
                 _chatgptKey = cKey;
                 _claudeKey = clKey;
+                _elevenLabsKey = eKey;
               });
             }
 
@@ -137,6 +183,7 @@ jobs:
               TextEditingController gController = TextEditingController(text: _geminiKey);
               TextEditingController cController = TextEditingController(text: _chatgptKey);
               TextEditingController clController = TextEditingController(text: _claudeKey);
+              TextEditingController eController = TextEditingController(text: _elevenLabsKey);
 
               showDialog(
                 context: context,
@@ -144,13 +191,13 @@ jobs:
                   builder: (context, setDialogState) {
                     return AlertDialog(
                       backgroundColor: const Color(0xFF1E293B),
-                      title: const Text('AI Settings & Keys'),
+                      title: const Text('AI & Voice Settings'),
                       content: SingleChildScrollView(
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text('Active AI Engine:', style: TextStyle(color: Colors.cyan)),
+                            const Text('Active AI Engine:', style: TextStyle(color: Colors.cyanAccent)),
                             DropdownButton<String>(
                               value: tempProvider,
                               isExpanded: true,
@@ -164,40 +211,26 @@ jobs:
                                 }
                               },
                             ),
-                            const SizedBox(height: 15),
-                            const Text('Google Gemini API Key:', style: TextStyle(fontSize: 12, color: Colors.grey)),
-                            TextField(
-                              controller: gController,
-                              decoration: const InputDecoration(hintText: 'Paste Gemini Key', isDense: true),
-                            ),
+                            const SizedBox(height: 12),
+                            const Text('Gemini API Key:', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                            TextField(controller: gController, decoration: const InputDecoration(hintText: 'Paste Gemini Key', isDense: true)),
                             const SizedBox(height: 10),
-                            const Text('OpenAI ChatGPT API Key:', style: TextStyle(fontSize: 12, color: Colors.grey)),
-                            TextField(
-                              controller: cController,
-                              decoration: const InputDecoration(hintText: 'Paste OpenAI Key', isDense: true),
-                            ),
+                            const Text('ChatGPT API Key:', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                            TextField(controller: cController, decoration: const InputDecoration(hintText: 'Paste OpenAI Key', isDense: true)),
                             const SizedBox(height: 10),
-                            const Text('Anthropic Claude API Key:', style: TextStyle(fontSize: 12, color: Colors.grey)),
-                            TextField(
-                              controller: clController,
-                              decoration: const InputDecoration(hintText: 'Paste Claude Key', isDense: true),
-                            ),
+                            const Text('Claude API Key:', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                            TextField(controller: clController, decoration: const InputDecoration(hintText: 'Paste Claude Key', isDense: true)),
+                            const SizedBox(height: 10),
+                            const Text('ElevenLabs API Key (Real Voice):', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                            TextField(controller: eController, decoration: const InputDecoration(hintText: 'ElevenLabs Voice Key', isDense: true)),
                           ],
                         ),
                       ),
                       actions: [
-                        TextButton(
-                          onPressed: () => Navigator.pop(context),
-                          child: const Text('Cancel'),
-                        ),
+                        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
                         ElevatedButton(
                           onPressed: () {
-                            _saveApiSettings(
-                              tempProvider,
-                              gController.text.trim(),
-                              cController.text.trim(),
-                              clController.text.trim(),
-                            );
+                            _saveApiSettings(tempProvider, gController.text.trim(), cController.text.trim(), clController.text.trim(), eController.text.trim());
                             Navigator.pop(context);
                           },
                           child: const Text('Save Settings'),
@@ -207,6 +240,51 @@ jobs:
                   },
                 ),
               );
+            }
+
+            Future<bool> _handleNativeCommands(String command) async {
+              String text = command.toLowerCase();
+
+              if (text.contains("flashlight turn on") || text.contains("flashlight on") || text.contains("torch on")) {
+                try {
+                  await TorchLight.enableTorch();
+                  _speakAndShow("Flashlight chalu kar di hai Sonu ji!");
+                } catch (e) {
+                  _speakAndShow("Flashlight enable nahi ho saki.");
+                }
+                return true;
+              } else if (text.contains("flashlight turn off") || text.contains("flashlight off") || text.contains("torch off")) {
+                try {
+                  await TorchLight.disableTorch();
+                  _speakAndShow("Flashlight band kar di hai!");
+                } catch (e) {
+                  _speakAndShow("Flashlight disable nahi ho saki.");
+                }
+                return true;
+              } else if (text.contains("youtube") && (text.contains("chalao") || text.contains("open") || text.contains("play"))) {
+                String query = text.replaceAll("youtube", "").replaceAll("par", "").replaceAll("funny videos", "funny videos").replaceAll("chalao", "").replaceAll("play", "").replaceAll("open", "").trim();
+                String url = query.isNotEmpty
+                    ? "https://www.youtube.com/results?search_query=${Uri.encodeComponent(query)}"
+                    : "https://www.youtube.com";
+                final uri = Uri.parse(url);
+                if (await canLaunchUrl(uri)) {
+                  await launchUrl(uri, mode: LaunchMode.externalApplication);
+                  _speakAndShow("YouTube open kar raha hu!");
+                }
+                return true;
+              } else if (text.contains("call") || text.contains("phone karo")) {
+                if (text.contains("junu")) {
+                  final uri = Uri.parse("tel:");
+                  await launchUrl(uri);
+                  _speakAndShow("Junu ko call dialer open kar diya hai!");
+                } else {
+                  final uri = Uri.parse("tel:");
+                  await launchUrl(uri);
+                  _speakAndShow("Dialer open kar diya hai!");
+                }
+                return true;
+              }
+              return false;
             }
 
             void _toggleStandbyMode() {
@@ -240,7 +318,7 @@ jobs:
               if (available) {
                 setState(() => _isListening = true);
                 _speech.listen(
-                  onResult: (val) {
+                  onResult: (val) async {
                     String recognized = val.recognizedWords.toLowerCase();
                     setState(() {
                       _userSpeech = val.recognizedWords;
@@ -248,10 +326,11 @@ jobs:
 
                     if (recognized.contains("hello power") || recognized.contains("power")) {
                       _speech.stop();
-                      _speakAndShow("Haan ji, main sun raha hu! Boliye kya madad karu?");
+                      _speakAndShow("Haan Sonu ji, main sun raha hu! Kya madad karu?");
                       Future.delayed(const Duration(seconds: 2), () => _listenOnce());
                     } else if (!_standbyMode && recognized.isNotEmpty) {
-                      _getAiResponse(val.recognizedWords);
+                      bool handled = await _handleNativeCommands(val.recognizedWords);
+                      if (!handled) _getAiResponse(val.recognizedWords);
                     }
                   },
                 );
@@ -260,11 +339,12 @@ jobs:
 
             void _listenOnce() async {
               bool available = await _speech.initialize(
-                onStatus: (val) {
+                onStatus: (val) async {
                   if (val == 'done' || val == 'notListening') {
                     setState(() => _isListening = false);
                     if (_userSpeech.isNotEmpty && !_userSpeech.toLowerCase().contains("hello power")) {
-                      _getAiResponse(_userSpeech);
+                      bool handled = await _handleNativeCommands(_userSpeech);
+                      if (!handled) _getAiResponse(_userSpeech);
                     }
                   }
                 },
@@ -291,6 +371,8 @@ jobs:
                 _aiResponse = "Soch raha hu ($_selectedProvider)...";
               });
 
+              String fullPrompt = "$_aiContextMemory\nUser Question: $prompt";
+
               try {
                 if (_selectedProvider == "Gemini") {
                   if (_geminiKey.isEmpty) {
@@ -303,7 +385,7 @@ jobs:
                     headers: {'Content-Type': 'application/json'},
                     body: jsonEncode({
                       "contents": [
-                        {"parts": [{"text": "Short & natural Hindi answer: $prompt"}]}
+                        {"parts": [{"text": fullPrompt}]}
                       ]
                     }),
                   );
@@ -328,7 +410,7 @@ jobs:
                     body: jsonEncode({
                       "model": "gpt-3.5-turbo",
                       "messages": [
-                        {"role": "user", "content": "Short & natural Hindi answer: $prompt"}
+                        {"role": "user", "content": fullPrompt}
                       ]
                     }),
                   );
@@ -355,7 +437,7 @@ jobs:
                       "model": "claude-3-haiku-20240307",
                       "max_tokens": 300,
                       "messages": [
-                        {"role": "user", "content": "Short & natural Hindi answer: $prompt"}
+                        {"role": "user", "content": fullPrompt}
                       ]
                     }),
                   );
@@ -384,13 +466,13 @@ jobs:
             Widget build(BuildContext context) {
               return Scaffold(
                 appBar: AppBar(
-                  title: Text('MAX AI ($_selectedProvider)'),
+                  title: Text('MAX JARVIS ($_selectedProvider)'),
                   centerTitle: true,
                   backgroundColor: Colors.transparent,
                   elevation: 0,
                   actions: [
                     IconButton(
-                      icon: const Icon(Icons.settings, color: Colors.cyan),
+                      icon: const Icon(Icons.settings, color: Colors.cyanAccent),
                       onPressed: _showSettingsDialog,
                     )
                   ],
@@ -402,10 +484,10 @@ jobs:
                       Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          const Text("Standby Wake Mode ('Hello Power'): "),
+                          const Text("Wake Word ('Hello Power'): "),
                           Switch(
                             value: _standbyMode,
-                            activeColor: Colors.cyan,
+                            activeColor: Colors.cyanAccent,
                             onChanged: (val) => _toggleStandbyMode(),
                           ),
                         ],
@@ -415,8 +497,9 @@ jobs:
                           padding: const EdgeInsets.all(12),
                           margin: const EdgeInsets.only(top: 8),
                           decoration: BoxDecoration(
-                            color: Colors.white10,
+                            color: Colors.cyan.withOpacity(0.1),
                             borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: Colors.cyanAccent.withOpacity(0.3)),
                           ),
                           child: Text(
                             'Aapne Kaha: "$_userSpeech"',
@@ -425,29 +508,59 @@ jobs:
                           ),
                         ),
                       const Spacer(),
-                      AnimatedContainer(
-                        duration: const Duration(milliseconds: 300),
-                        width: 140,
-                        height: 140,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: _isListening
-                              ? Colors.redAccent.withOpacity(0.2)
-                              : Colors.cyan.withOpacity(0.2),
-                          border: Border.all(
-                            color: _isListening ? Colors.redAccent : Colors.cyan,
-                            width: 3,
-                          ),
-                        ),
-                        child: Icon(
-                          _isListening ? Icons.graphic_eq : Icons.psychology,
-                          size: 60,
-                          color: _isListening ? Colors.redAccent : Colors.cyan,
-                        ),
+                      
+                      // Animated Jarvis Glowing Visualizer
+                      AnimatedBuilder(
+                        animation: _animController,
+                        builder: (context, child) {
+                          double scale = 1.0 + math.sin(_animController.value * 2 * math.pi) * 0.1;
+                          return Transform.scale(
+                            scale: _isListening ? scale * 1.15 : scale,
+                            child: Container(
+                              width: 170,
+                              height: 170,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                gradient: RadialGradient(
+                                  colors: _isListening
+                                      ? [Colors.redAccent.withOpacity(0.8), Colors.deepOrange.withOpacity(0.2), Colors.transparent]
+                                      : [Colors.cyanAccent.withOpacity(0.8), Colors.blue.withOpacity(0.2), Colors.transparent],
+                                ),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: _isListening ? Colors.redAccent.withOpacity(0.6) : Colors.cyanAccent.withOpacity(0.6),
+                                    blurRadius: _isListening ? 35 : 25,
+                                    spreadRadius: 5,
+                                  )
+                                ],
+                              ),
+                              child: Center(
+                                child: Container(
+                                  width: 110,
+                                  height: 110,
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    color: const Color(0xFF0F172A),
+                                    border: Border.all(
+                                      color: _isListening ? Colors.redAccent : Colors.cyanAccent,
+                                      width: 2.5,
+                                    ),
+                                  ),
+                                  child: Icon(
+                                    _isListening ? Icons.graphic_eq : Icons.psychology,
+                                    size: 50,
+                                    color: _isListening ? Colors.redAccent : Colors.cyanAccent,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          );
+                        },
                       ),
-                      const SizedBox(height: 30),
+                      
+                      const SizedBox(height: 35),
                       _isLoading
-                          ? const CircularProgressIndicator(color: Colors.cyan)
+                          ? const CircularProgressIndicator(color: Colors.cyanAccent)
                           : SingleChildScrollView(
                               child: Text(
                                 _aiResponse,
@@ -460,11 +573,11 @@ jobs:
                         onTap: _listenOnce,
                         child: CircleAvatar(
                           radius: 40,
-                          backgroundColor: _isListening ? Colors.redAccent : Colors.cyan,
+                          backgroundColor: _isListening ? Colors.redAccent : Colors.cyanAccent,
                           child: Icon(
                             _isListening ? Icons.stop : Icons.mic,
-                            color: Colors.white,
-                            size: 36,
+                            color: Colors.black,
+                            size: 38,
                           ),
                         ),
                       ),
