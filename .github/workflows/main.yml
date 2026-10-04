@@ -27,12 +27,12 @@ jobs:
           rm -rf android
           flutter create . --platforms=android --org com.example.max_assistant --project-name max_assistant
 
-      - name: Force Kotlin 1.9.22 & Min SDK 21
+      - name: Force Kotlin 1.9.22, Min SDK 21 & Android Permissions
         run: |
           python3 - << 'EOF'
           import os, re
 
-          # 1. Update Kotlin in settings.gradle
+          # 1. Settings gradle
           s_file = 'android/settings.gradle'
           if os.path.exists(s_file):
               with open(s_file, 'r') as f:
@@ -41,7 +41,7 @@ jobs:
               with open(s_file, 'w') as f:
                   f.write(txt)
 
-          # 2. Update Kotlin in build.gradle
+          # 2. Build gradle
           b_file = 'android/build.gradle'
           if os.path.exists(b_file):
               with open(b_file, 'r') as f:
@@ -53,7 +53,7 @@ jobs:
               with open(b_file, 'w') as f:
                   f.write(txt)
 
-          # 3. Force Min SDK to 21 in app/build.gradle
+          # 3. App build gradle
           app_b_file = 'android/app/build.gradle'
           if os.path.exists(app_b_file):
               with open(app_b_file, 'r') as f:
@@ -63,7 +63,20 @@ jobs:
               with open(app_b_file, 'w') as f:
                   f.write(txt)
 
-          print("Kotlin 1.9.22 and Min SDK 21 successfully updated.")
+          # 4. Add Microphone & Internet Permissions to AndroidManifest.xml
+          m_file = 'android/app/src/main/AndroidManifest.xml'
+          if os.path.exists(m_file):
+              with open(m_file, 'r') as f:
+                  txt = f.read()
+              perms = '''
+      <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+      <uses-permission android:name="android.permission.INTERNET"/>
+  '''
+              txt = txt.replace('<manifest', '<manifest\n' + perms)
+              with open(m_file, 'w') as f:
+                  f.write(txt)
+
+          print("All configuration updated successfully.")
           EOF
 
       - name: Install dependencies
