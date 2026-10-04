@@ -22,26 +22,19 @@ jobs:
         with:
           flutter-version: '3.19.6'
 
-      - name: Create Clean Flutter Project & Fix Kotlin
+      - name: Create Clean Flutter Project & Fix Config
         run: |
           flutter create . --platforms=android --org com.example.max_assistant --project-name max_assistant
           flutter pub add speech_to_text flutter_tts http shared_preferences torch_light url_launcher permission_handler
           
-          # Force fix Kotlin version in android/build.gradle right after project creation
+          # Fix Kotlin version safely using sed without any python indentation risk
           GRADLE_FILE="android/build.gradle"
           if [ -f "$GRADLE_FILE" ]; then
-            python3 -c "
-            with open('$GRADLE_FILE', 'r') as f:
-                content = f.read()
-            if 'ext.kotlin_version' in content:
-                import re
-                content = re.sub(r'ext.kotlin_version\s*=\s*[\"'].*?[\"']', \"ext.kotlin_version = '1.9.22'\", content)
-            else:
-                content = content.replace('buildscript {', \"buildscript {\\n    ext.kotlin_version = '1.9.22'\")
-            with open('$GRADLE_FILE', 'w') as f:
-                f.write(content)
-            print('Successfully set Kotlin version to 1.9.22')
-            "
+            if grep -q "ext.kotlin_version" "$GRADLE_FILE"; then
+              sed -i "s/ext.kotlin_version\s*=.*/ext.kotlin_version = '1.9.22'/g" "$GRADLE_FILE"
+            else
+              sed -i "1s/^/buildscript {\n    ext.kotlin_version = '1.9.22'\n}\n/" "$GRADLE_FILE"
+            fi
           fi
 
       - name: Create lib/main.dart Code
