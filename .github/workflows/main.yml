@@ -28,21 +28,28 @@ jobs:
           flutter create . --platforms=android --org com.example.max_assistant --project-name max_assistant
           flutter pub add speech_to_text flutter_tts http shared_preferences torch_light url_launcher permission_handler
 
-      - name: Force Fix Android Gradle SDK Versions
+      - name: Fix Android SDK Versions Properly
         run: |
           APP_GRADLE="android/app/build.gradle"
-          if [ -f "$APP_GRADLE" ]; then
-            # Replace minSdkVersion safely
-            sed -i 's/minSdkVersion.*/minSdkVersion 21/g' $APP_GRADLE
-            sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 21/g' $APP_GRADLE
-            
-            # Replace target and compile SDK versions
-            sed -i 's/targetSdkVersion.*/targetSdkVersion 34/g' $APP_GRADLE
-            sed -i 's/targetSdkVersion flutter.targetSdkVersion/targetSdkVersion 34/g' $APP_GRADLE
-            
-            sed -i 's/compileSdkVersion.*/compileSdkVersion 34/g' $APP_GRADLE
-            sed -i 's/compileSdkVersion flutter.compileSdkVersion/compileSdkVersion 34/g' $APP_GRADLE
-          fi
+          python3 -c "
+          with open('$APP_GRADLE', 'r') as f:
+              content = f.read()
+
+          # Replace compileSdkVersion, targetSdkVersion, minSdkVersion cleanly
+          content = content.replace('compileSdkVersion flutter.compileSdkVersion', 'compileSdkVersion 34')
+          content = content.replace('targetSdkVersion flutter.targetSdkVersion', 'targetSdkVersion 34')
+          content = content.replace('minSdkVersion flutter.minSdkVersion', 'minSdkVersion 21')
+          
+          # In case they are written with numbers already
+          if 'minSdkVersion 16' in content:
+              content = content.replace('minSdkVersion 16', 'minSdkVersion 21')
+          if 'minSdkVersion 19' in content:
+              content = content.replace('minSdkVersion 19', 'minSdkVersion 21')
+
+          with open('$APP_GRADLE', 'w') as f:
+              f.write(content)
+          print('Successfully updated build.gradle SDK versions!')
+          "
 
           MANIFEST="android/app/src/main/AndroidManifest.xml"
           if [ -f "$MANIFEST" ]; then
