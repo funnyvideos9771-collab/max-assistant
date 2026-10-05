@@ -167,7 +167,7 @@ jobs:
             void _loadApiSettings() async {
               SharedPreferences prefs = await SharedPreferences.getInstance();
               setState(() {
-                _geminiKey = prefs.getString('gemini_api_key'] ?? _inbuiltGeminiKey;
+                _geminiKey = prefs.getString('gemini_api_key') ?? _inbuiltGeminiKey;
                 _elevenLabsKey = prefs.getString('elevenlabs_api_key') ?? "";
                 _activeUserRole = prefs.getString('user_role') ?? "Boss";
               });
@@ -415,7 +415,6 @@ jobs:
                     _speakAndShow(ans);
                   }
                 } else {
-                  // Intelligent fallback so app never fails even if API quota is reached
                   _speakAndShow("Yes $_activeUserRole, maine aapka sawal sun liya hai. Sabhi features ekdam badhiya kaam kar rahe hain!");
                 }
               } catch (e) {
