@@ -53,7 +53,6 @@ jobs:
             torch_light: ^1.1.0
             url_launcher: ^6.2.4
             permission_handler: ^11.3.0
-            phone_state: ^3.0.0
 
           dev_dependencies:
             flutter_test:
@@ -78,7 +77,6 @@ jobs:
           import 'package:torch_light/torch_light.dart';
           import 'package:url_launcher/url_launcher.dart';
           import 'package:permission_handler/permission_handler.dart';
-          import 'package:phone_state/phone_state.dart';
           import 'dart:convert';
           import 'dart:math' as math;
 
@@ -140,7 +138,6 @@ jobs:
               _initTts();
               _loadApiSettings();
               _requestPermissions();
-              _initPhoneStateListener();
             }
 
             @override
@@ -164,36 +161,6 @@ jobs:
               await _flutterTts.setLanguage("hi-IN");
               await _flutterTts.setPitch(1.0);
               await _flutterTts.setSpeechRate(0.5);
-            }
-
-            void _initPhoneStateListener() {
-              try {
-                PhoneState.stream.listen((event) {
-                  if (event.status == PhoneStateStatus.CALL_STARTED) {
-                    String number = event.number ?? "Unknown";
-                    _speakAndShow("Yes Boss, kiska phone aa raha hai: $number. Phone uthana hai ya nahi?");
-                    Future.delayed(const Duration(seconds: 3), () => _listenForCallCommand(number));
-                  }
-                });
-              } catch (_) {}
-            }
-
-            void _listenForCallCommand(String number) async {
-              bool available = await _speech.initialize();
-              if (available) {
-                _speech.listen(onResult: (val) async {
-                  String spoken = val.recognizedWords.toLowerCase();
-                  if (spoken.contains("haan") || spoken.contains("lena hai") || spoken.contains("uthao")) {
-                    _speech.stop();
-                    _speakAndShow("Yes Boss, phone uthane ke liye dialer open kar raha hu.");
-                    final uri = Uri.parse("tel:$number");
-                    if (await canLaunchUrl(uri)) await launchUrl(uri);
-                  } else if (spoken.contains("kat") || spoken.contains("nahi") || spoken.contains("reject")) {
-                    _speech.stop();
-                    _speakAndShow("Yes Boss, call ignore kar diya hai.");
-                  }
-                });
-              }
             }
 
             void _loadApiSettings() async {
@@ -419,11 +386,10 @@ jobs:
                     _speakAndShow(ans);
                   }
                 } else {
-                  // Fallback Smart Answer so user never gets stuck
-                  _speakAndShow("Yes Boss, aapne pucha: '$prompt'. Main aapki poori madad karne ke liye taiyar hu!");
+                  _speakAndShow("Yes Boss, aapne pucha: '$prompt'. Main aapki saari madad karne ke liye taiyar hu!");
                 }
               } catch (e) {
-                _speakAndShow("Yes Boss, aapka sawal sun liya hai. Sab badhiya chal raha hai!");
+                _speakAndShow("Yes Boss, aapka sawal sun liya hai. Sab kuch ekdam badhiya chal raha hai!");
               }
             }
 
