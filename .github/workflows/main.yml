@@ -66,7 +66,7 @@ jobs:
 
           flutter pub get
 
-      - name: Create lib/main.dart with Stable Human Voice & Groq AI
+      - name: Create lib/main.dart with Clean Syntax
         run: |
           mkdir -p lib
           cat << 'EOF' > lib/main.dart
@@ -595,7 +595,7 @@ jobs:
                         },
                       ),
                       
-                      NextSpacer: const SizedBox(height: 30),
+                      const SizedBox(height: 30),
                       _isLoading
                           ? const CircularProgressIndicator(color: Colors.amberAccent)
                           : Expanded(
