@@ -41,7 +41,7 @@ jobs:
           version: 1.0.0+1
 
           environment:
-            sdk: '>=3.0.0 <4.0.0'
+            sdk: '>=3.5.0 <4.0.0'
 
           dependencies:
             flutter:
@@ -53,6 +53,8 @@ jobs:
             torch_light: ^1.1.0
             url_launcher: ^6.2.4
             permission_handler: ^11.3.0
+            phone_state: ^3.0.0
+            intl: ^0.19.0
 
           dev_dependencies:
             flutter_test:
@@ -77,6 +79,8 @@ jobs:
           import 'package:torch_light/torch_light.dart';
           import 'package:url_launcher/url_launcher.dart';
           import 'package:permission_handler/permission_handler.dart';
+          import 'package:phone_state/phone_state.dart';
+          import 'package:intl/intl.dart';
           import 'dart:convert';
           import 'dart:math' as math;
 
@@ -118,12 +122,11 @@ jobs:
             bool _standbyMode = false;
             String _userSpeech = "";
             String _aiResponse = "Tap mic or say 'Hello Power' in Standby Mode!";
+            String _activeUserRole = "Boss"; // Default Sonu
 
             final String _inbuiltGeminiKey = "AIzaSyB3-V9xK1mQ5Lw2z8R7t4Yp6Nc0Jh1Df3G"; 
             String _geminiKey = "";
             String _elevenLabsKey = "";
-
-            final String _aiContextMemory = "Your name is Max, an advanced AI voice assistant created for Sonu and Junu, and Jivani is the model name. Always address the user respectfully as 'Yes Boss'. Keep your answers short, crisp, and helpful in Hindi/Hinglish.";
 
             @override
             void initState() {
@@ -138,6 +141,7 @@ jobs:
               _initTts();
               _loadApiSettings();
               _requestPermissions();
+              _initPhoneStateListener();
             }
 
             @override
@@ -163,54 +167,105 @@ jobs:
               await _flutterTts.setSpeechRate(0.5);
             }
 
+            void _initPhoneStateListener() {
+              try {
+                PhoneState.stream.listen((event) {
+                  if (event.status == PhoneStateStatus.CALL_STARTED) {
+                    String number = event.number ?? "Unknown";
+                    _speakAndShow("Incoming call from $number. Phone uthana hai ya reject karna hai?");
+                    Future.delayed(const Duration(seconds: 3), () => _listenForCallCommand(number));
+                  }
+                });
+              } catch (_) {}
+            }
+
+            void _listenForCallCommand(String number) async {
+              bool available = await _speech.initialize();
+              if (available) {
+                _speech.listen(onResult: (val) async {
+                  String spoken = val.recognizedWords.toLowerCase();
+                  if (spoken.contains("haan") || spoken.contains("uthao") || spoken.contains("lena hai")) {
+                    _speech.stop();
+                    final uri = Uri.parse("tel:$number");
+                    if (await canLaunchUrl(uri)) await launchUrl(uri);
+                  } else if (spoken.contains("kat") || spoken.contains("nahi") || spoken.contains("reject")) {
+                    _speech.stop();
+                    _speakAndShow("Call ignored.");
+                  }
+                });
+              }
+            }
+
             void _loadApiSettings() async {
               SharedPreferences prefs = await SharedPreferences.getInstance();
               setState(() {
                 _geminiKey = prefs.getString('gemini_api_key') ?? _inbuiltGeminiKey;
                 _elevenLabsKey = prefs.getString('elevenlabs_api_key') ?? "";
+                _activeUserRole = prefs.getString('user_role') ?? "Boss";
               });
             }
 
-            void _saveApiSettings(String gKey, String eKey) async {
+            void _saveApiSettings(String gKey, String eKey, String role) async {
               SharedPreferences prefs = await SharedPreferences.getInstance();
               await prefs.setString('gemini_api_key', gKey);
               await prefs.setString('elevenlabs_api_key', eKey);
+              await prefs.setString('user_role', role);
               setState(() {
                 _geminiKey = gKey.isNotEmpty ? gKey : _inbuiltGeminiKey;
                 _elevenLabsKey = eKey;
+                _activeUserRole = role;
               });
             }
 
             void _showSettingsDialog() {
               TextEditingController gController = TextEditingController(text: _geminiKey == _inbuiltGeminiKey ? "" : _geminiKey);
               TextEditingController eController = TextEditingController(text: _elevenLabsKey);
+              String selectedRole = _activeUserRole;
 
               showDialog(
                 context: context,
-                builder: (context) => AlertDialog(
-                  backgroundColor: const Color(0xFF1E293B),
-                  title: const Text('API Settings'),
-                  content: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('Gemini API Key:', style: TextStyle(fontSize: 12, color: Colors.cyanAccent)),
-                      TextField(controller: gController, decoration: const InputDecoration(hintText: 'Optional custom key', isDense: true)),
-                      const SizedBox(height: 10),
-                      const Text('ElevenLabs API Key:', style: TextStyle(fontSize: 12, color: Colors.cyanAccent)),
-                      TextField(controller: eController, decoration: const InputDecoration(hintText: 'ElevenLabs Key', isDense: true)),
+                builder: (context) => StatefulBuilder(
+                  builder: (context, setDialogState) => AlertDialog(
+                    backgroundColor: const Color(0xFF1E293B),
+                    title: const Text('Max Settings & Profiles'),
+                    content: SingleChildScrollView(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('Active User Profile:', style: TextStyle(fontSize: 12, color: Colors.cyanAccent)),
+                          DropdownButton<String>(
+                            value: selectedRole,
+                            dropdownColor: const Color(0xFF1E293B),
+                            isExpanded: true,
+                            items: const [
+                              DropdownMenuItem(value: "Boss", child: Text("Sonu (Boss)")),
+                              DropdownMenuItem(value: "Madam", child: Text("Wife (Madam)")),
+                              DropdownMenuItem(value: "Mummy ji", child: Text("Mummy (Mummy ji)")),
+                              DropdownMenuItem(value: "Aditi", child: Text("Daughter (Aditi)")),
+                            ],
+                            onChanged: (val) => setDialogState(() => selectedRole = val ?? "Boss"),
+                          ),
+                          const SizedBox(height: 10),
+                          const Text('Gemini API Key:', style: TextStyle(fontSize: 12, color: Colors.cyanAccent)),
+                          TextField(controller: gController, decoration: const InputDecoration(hintText: 'Optional custom key', isDense: true)),
+                          const SizedBox(height: 10),
+                          const Text('ElevenLabs API Key:', style: TextStyle(fontSize: 12, color: Colors.cyanAccent)),
+                          TextField(controller: eController, decoration: const InputDecoration(hintText: 'ElevenLabs Key', isDense: true)),
+                        ],
+                      ),
+                    ),
+                    actions: [
+                      TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+                      ElevatedButton(
+                        onPressed: () {
+                          _saveApiSettings(gController.text.trim(), eController.text.trim(), selectedRole);
+                          Navigator.pop(context);
+                        },
+                        child: const Text('Save'),
+                      ),
                     ],
                   ),
-                  actions: [
-                    TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-                    ElevatedButton(
-                      onPressed: () {
-                        _saveApiSettings(gController.text.trim(), eController.text.trim());
-                        Navigator.pop(context);
-                      },
-                      child: const Text('Save'),
-                    ),
-                  ],
                 ),
               );
             }
@@ -221,48 +276,48 @@ jobs:
               if (text.contains("flashlight") && (text.contains("on") || text.contains("chalu"))) {
                 try {
                   await TorchLight.enableTorch();
-                  _speakAndShow("Yes Boss, flashlight chalu kar di hai!");
+                  _speakAndShow("Flashlight turned on.");
                 } catch (e) {
-                  _speakAndShow("Yes Boss, flashlight enable nahi ho saki.");
+                  _speakAndShow("Could not enable flashlight.");
                 }
                 return true;
               } else if (text.contains("flashlight") && (text.contains("off") || text.contains("band"))) {
                 try {
                   await TorchLight.disableTorch();
-                  _speakAndShow("Yes Boss, flashlight band kar di hai!");
+                  _speakAndShow("Flashlight turned off.");
                 } catch (e) {
-                  _speakAndShow("Yes Boss, flashlight disable nahi ho saki.");
+                  _speakAndShow("Could not disable flashlight.");
                 }
                 return true;
-              } else if (text.contains("youtube") && (text.contains("chalao") || text.contains("open") || text.contains("play"))) {
-                String query = text.replaceAll("youtube", "").replaceAll("par", "").replaceAll("chalao", "").replaceAll("play", "").replaceAll("open", "").trim();
+              } else if (text.contains("youtube") && (text.contains("chalao") || text.contains("open") || text.contains("play") || text.contains("search"))) {
+                String query = text.replaceAll("youtube", "").replaceAll("par", "").replaceAll("chalao", "").replaceAll("play", "").replaceAll("open", "").replaceAll("search", "").replaceAll("karo", "").trim();
                 String url = query.isNotEmpty
                     ? "https://www.youtube.com/results?search_query=${Uri.encodeComponent(query)}"
                     : "https://www.youtube.com";
                 final uri = Uri.parse(url);
                 if (await canLaunchUrl(uri)) {
                   await launchUrl(uri, mode: LaunchMode.externalApplication);
-                  _speakAndShow("Yes Boss, YouTube open kar raha hu!");
+                  _speakAndShow(query.isNotEmpty ? "Playing '$query' on YouTube." : "Opening YouTube.");
                 }
                 return true;
               } else if (text.contains("flipkart") || text.contains("meesho") || text.contains("amazon")) {
                 String platform = text.contains("meesho") ? "Meesho" : (text.contains("amazon") ? "Amazon" : "Flipkart");
                 String query = text.replaceAll("flipkart", "").replaceAll("meesho", "").replaceAll("amazon", "").replaceAll("par", "").replaceAll("dhundo", "").replaceAll("search", "").replaceAll("karo", "").trim();
                 
-                _speakAndShow("Yes Boss, $platform par '$query' search kar raha hu.");
+                _speakAndShow("Searching for '$query' on $platform.");
                 String searchUrl = platform == "Meesho" 
                     ? "https://www.meesho.com/search?q=${Uri.encodeComponent(query)}"
                     : (platform == "Amazon" 
                         ? "https://www.amazon.in/s?k=${Uri.encodeComponent(query)}"
                         : "https://www.flipkart.com/search?q=${Uri.encodeComponent(query)}");
                 
-                final uri = Uri.parse(searchUrl);
+                final uri = Uri.parsesearchUrl = Uri.parse(searchUrl);
                 if (await canLaunchUrl(uri)) {
                   await launchUrl(uri, mode: LaunchMode.externalApplication);
                 }
                 return true;
               } else if (text.contains("whatsapp") && (text.contains("message") || text.contains("bhejo") || text.contains("likho"))) {
-                _speakAndShow("Yes Boss, WhatsApp par message bhej raha hu.");
+                _speakAndShow("Sending message via WhatsApp.");
                 final uri = Uri.parse("https://wa.me/?text=${Uri.encodeComponent(command)}");
                 if (await canLaunchUrl(uri)) {
                   await launchUrl(uri, mode: LaunchMode.externalApplication);
@@ -277,12 +332,12 @@ jobs:
                 _standbyMode = !_standbyMode;
               });
               if (_standbyMode) {
-                _speakAndShow("Yes Boss, standby mode ON! Ab 'Hello Power' boliye.");
+                _speakAndShow("Standby mode activated. Say 'Hello Power'.");
                 _startContinuousListening();
               } else {
                 _speech.stop();
                 setState(() => _isListening = false);
-                _speakAndShow("Yes Boss, standby mode OFF.");
+                _speakAndShow("Standby mode deactivated.");
               }
             }
 
@@ -311,7 +366,7 @@ jobs:
 
                     if (recognized.contains("hello power") || recognized.contains("power")) {
                       _speech.stop();
-                      _speakAndShow("Yes Boss, main sun raha hu! Bataiye kya madad karu?");
+                      _speakAndShow("Listening, $_activeUserRole. How can I help you?");
                       Future.delayed(const Duration(seconds: 2), () => _listenOnce());
                     } else if (!_standbyMode && recognized.isNotEmpty) {
                       bool handled = await _handleNativeCommands(val.recognizedWords);
@@ -353,12 +408,14 @@ jobs:
             Future<void> _getAiResponse(String prompt) async {
               setState(() {
                 _isLoading = true;
-                _aiResponse = "Soch raha hu...";
+                _aiResponse = "Thinking...";
               });
 
               try {
                 String activeKey = _geminiKey.isNotEmpty ? _geminiKey : _inbuiltGeminiKey;
-                String fullPrompt = "$_aiContextMemory\nUser Question: $prompt";
+                String addressing = _activeUserRole == "Boss" ? "Boss" : (_activeUserRole == "Madam" ? "Madam" : (_activeUserRole == "Mummy ji" ? "Mummy ji" : "Aditi"));
+                
+                String systemPrompt = "You are Max, an advanced AI voice assistant created for Sonu and Junu, with model name Jivani. Address the current user respectfully as '$addressing'. Provide direct, accurate, and natural responses.";
                 
                 Uri url = Uri.parse('https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$activeKey');
                 
@@ -367,7 +424,11 @@ jobs:
                   headers: {'Content-Type': 'application/json'},
                   body: jsonEncode({
                     "contents": [
-                      {"parts": [{"text": fullPrompt}]}
+                      {
+                        "parts": [
+                          {"text": "$systemPrompt\nUser Query: $prompt"}
+                        ]
+                      }
                     ]
                   }),
                 );
@@ -377,7 +438,7 @@ jobs:
                   String ans = data['candidates'][0]['content']['parts'][0]['text'].toString().trim();
                   
                   if (prompt.toLowerCase().contains("application") && prompt.toLowerCase().contains("whatsapp")) {
-                    _speakAndShow("Yes Boss, application likh kar WhatsApp par bhej raha hu.");
+                    _speakAndShow("Drafting application and sending via WhatsApp.");
                     final uri = Uri.parse("https://wa.me/?text=${Uri.encodeComponent(ans)}");
                     if (await canLaunchUrl(uri)) {
                       await launchUrl(uri, mode: LaunchMode.externalApplication);
@@ -386,10 +447,10 @@ jobs:
                     _speakAndShow(ans);
                   }
                 } else {
-                  _speakAndShow("Yes Boss, aapne pucha: '$prompt'. Main aapki saari madad karne ke liye taiyar hu!");
+                  _speakAndShow("Gemini API connection error. Please check your API key in settings.");
                 }
               } catch (e) {
-                _speakAndShow("Yes Boss, aapka sawal sun liya hai. Sab kuch ekdam badhiya chal raha hai!");
+                _speakAndShow("Network error. Please check your internet connection.");
               }
             }
 
@@ -429,7 +490,7 @@ jobs:
             Widget build(BuildContext context) {
               return Scaffold(
                 appBar: AppBar(
-                  title: const Text('MAX JARVIS (Gemini)'),
+                  title: Text('MAX JARVIS ($_activeUserRole)'),
                   centerTitle: true,
                   backgroundColor: Colors.transparent,
                   elevation: 0,
