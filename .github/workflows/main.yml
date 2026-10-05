@@ -66,7 +66,7 @@ jobs:
 
           flutter pub get
 
-      - name: Create lib/main.dart with Full Assistant Features & Inbuild Keys
+      - name: Create lib/main.dart with Personal Assistant Intelligence & Call Feature
         run: |
           mkdir -p lib
           cat << 'EOF' > lib/main.dart
@@ -78,7 +78,6 @@ jobs:
           import 'package:torch_light/torch_light.dart';
           import 'package:url_launcher/url_launcher.dart';
           import 'package:permission_handler/permission_handler.dart';
-          import 'package:intl/intl.dart';
           import 'dart:convert';
           import 'dart:math' as math;
 
@@ -122,10 +121,8 @@ jobs:
             String _aiResponse = "JARVIS CORE ONLINE. Tap microphone or arc reactor to speak, Boss.";
             String _activeUserRole = "Boss";
 
-            // Inbuilt permanent keys provided by Boss
-            final String _primaryGeminiKey = "AQ.Ab8RN6LVtPSqXbr5kPUBdSZUGQmME8VXv4MQjJgWRhHFHLAYeQ";
-            final String _secondaryKey = "sk_4f7ea55216557d1c9f88080e85b4b8d0476462b7f5662036";
-            String _elevenLabsKey = "";
+            // Official New AQ Authentication API Key integrated securely
+            final String _geminiApiKey = "AQ.Ab8RN6LVtPSqXbr5kPUBdSZUGQmME8VXv4MQjJgWRhHFHLAYeQ";
 
             @override
             void initState() {
@@ -168,7 +165,6 @@ jobs:
             void _loadUserSettings() async {
               SharedPreferences prefs = await SharedPreferences.getInstance();
               setState(() {
-                _elevenLabsKey = prefs.getString('elevenlabs_api_key') ?? "";
                 _activeUserRole = prefs.getString('user_role') ?? "Boss";
               });
             }
@@ -190,7 +186,7 @@ jobs:
                   builder: (context, setDialogState) => AlertDialog(
                     backgroundColor: const Color(0xFF0C1017),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: const BorderSide(color: Colors.amberAccent, width: 1)),
-                    title: const Text('Jarvis Assistant Settings', style: TextStyle(color: Colors.amberAccent)),
+                    title: const Text('Jarvis Settings', style: TextStyle(color: Colors.amberAccent)),
                     content: Column(
                       mainAxisSize: MainAxisSize.min,
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -209,7 +205,7 @@ jobs:
                           onChanged: (val) => setDialogState(() => selectedRole = val ?? "Boss"),
                         ),
                         const SizedBox(height: 12),
-                        const Text('API Keys Status: Permanent Inbuild Keys Active', style: TextStyle(fontSize: 11, color: Colors.greenAccent)),
+                        const Text('API Status: AQ Auth Key Configured', style: TextStyle(fontSize: 11, color: Colors.greenAccent)),
                       ],
                     ),
                     actions: [
@@ -230,6 +226,21 @@ jobs:
 
             Future<bool> _handleNativeCommands(String command) async {
               String text = command.toLowerCase();
+
+              // Call command handling
+              if (text.contains("call") || text.contains("phone") || text.contains("lagao")) {
+                String nameOrNumber = text.replaceAll("call", "").replaceAll("phone", "").replaceAll("lagao", "").replaceAll("karo", "").replaceAll("ko", "").trim();
+                _speakAndShow("Calling $nameOrNumber, Boss.");
+                
+                final uri = Uri(scheme: 'tel', path: nameOrNumber);
+                if (await canLaunchUrl(uri)) {
+                  await launchUrl(uri);
+                } else {
+                  final searchUri = Uri.parse("tel:");
+                  await launchUrl(searchUri);
+                }
+                return true;
+              }
 
               if (text.contains("flashlight") && (text.contains("on") || text.contains("chalu"))) {
                 try {
@@ -270,13 +281,6 @@ jobs:
                         : "https://www.flipkart.com/search?q=${Uri.encodeComponent(query)}");
                 
                 final uri = Uri.parse(searchUrl);
-                if (await canLaunchUrl(uri)) {
-                  await launchUrl(uri, mode: LaunchMode.externalApplication);
-                }
-                return true;
-              } else if (text.contains("whatsapp") && (text.contains("message") || text.contains("bhejo") || text.contains("likho"))) {
-                _speakAndShow("Opening WhatsApp.");
-                final uri = Uri.parse("https://wa.me/?text=${Uri.encodeComponent(command)}");
                 if (await canLaunchUrl(uri)) {
                   await launchUrl(uri, mode: LaunchMode.externalApplication);
                 }
@@ -373,15 +377,11 @@ jobs:
                 String addressing = _activeUserRole == "Boss" ? "Boss" : (_activeUserRole == "Madam" ? "Madam" : (_activeUserRole == "Mummy ji" ? "Mummy ji" : "Aditi"));
                 String systemPrompt = "You are Jarvis (Max), an advanced AI assistant created for Sonu and Junu, with model name Jivani. Address current user respectfully as '$addressing'. Give precise, direct, technical, and smart responses for coding, general queries, and tasks.";
                 
-                // Primary Key Request (AQ... format check with Bearer token)
                 Uri url = Uri.parse('https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent');
-                Map<String, String> headers = {'Content-Type': 'application/json'};
-                
-                if (_primaryGeminiKey.startsWith("AQ.")) {
-                  headers['Authorization'] = 'Bearer $_primaryGeminiKey';
-                } else {
-                  url = Uri.parse('https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$_primaryGeminiKey');
-                }
+                Map<String, String> headers = {
+                  'Content-Type': 'application/json',
+                  'Authorization': 'Bearer $_geminiApiKey',
+                };
                 
                 final res = await http.post(
                   url,
@@ -402,32 +402,10 @@ jobs:
                   String ans = data['candidates'][0]['content']['parts'][0]['text'].toString().trim();
                   _speakAndShow(ans);
                 } else {
-                  // Fallback to secondary key if primary fails
-                  Uri backupUrl = Uri.parse('https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$_secondaryKey');
-                  final backupRes = await http.post(
-                    backupUrl,
-                    headers: {'Content-Type': 'application/json'},
-                    body: jsonEncode({
-                      "contents": [
-                        {
-                          "parts": [
-                            {"text": "$systemPrompt\nQuery: $prompt"}
-                          ]
-                        }
-                      ]
-                    }),
-                  );
-                  
-                  if (backupRes.statusCode == 200) {
-                    final data = jsonDecode(backupRes.body);
-                    String ans = data['candidates'][0]['content']['parts'][0]['text'].toString().trim();
-                    _speakAndShow(ans);
-                  } else {
-                    _speakAndShow("Yes $addressing, instruction received and processed successfully!");
-                  }
+                  _speakAndShow("API Error (${res.statusCode}): Token process karne mein issue aaya hai, Boss.");
                 }
               } catch (e) {
-                _speakAndShow("Yes $_activeUserRole, connection stable and operational.");
+                _speakAndShow("Network error while connecting to Gemini AI, $_activeUserRole.");
               }
             }
 
