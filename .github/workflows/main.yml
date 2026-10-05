@@ -93,10 +93,10 @@ jobs:
             Widget build(BuildContext context) {
               return MaterialApp(
                 debugShowCheckedModeBanner: false,
-                title: 'Max AI Jarvis Assistant',
+                title: 'MAX JARVIS AI',
                 theme: ThemeData.dark().copyWith(
-                  scaffoldBackgroundColor: const Color(0xFF070B19),
-                  colorScheme: const ColorScheme.dark(primary: Colors.cyanAccent),
+                  scaffoldBackgroundColor: const Color(0xFF030508),
+                  colorScheme: const ColorScheme.dark(primary: Colors.amberAccent),
                 ),
                 home: const HomeScreen(),
               );
@@ -119,7 +119,7 @@ jobs:
             bool _isLoading = false;
             bool _standbyMode = false;
             String _userSpeech = "";
-            String _aiResponse = "Tap mic or say 'Hello Power' in Standby Mode!";
+            String _aiResponse = "JARVIS ONLINE. Tap mic or say 'Hello Power'.";
             String _activeUserRole = "Boss";
 
             final String _inbuiltGeminiKey = "AIzaSyA4Q9xK1mQ5Lw2z8R7t4Yp6Nc0Jh1Df3G"; 
@@ -133,7 +133,7 @@ jobs:
               _flutterTts = FlutterTts();
               _animController = AnimationController(
                 vsync: this,
-                duration: const Duration(seconds: 2),
+                duration: const Duration(seconds: 4),
               )..repeat();
 
               _initTts();
@@ -160,8 +160,8 @@ jobs:
 
             void _initTts() async {
               await _flutterTts.setLanguage("hi-IN");
-              await _flutterTts.setPitch(1.0);
-              await _flutterTts.setSpeechRate(0.5);
+              await _flutterTts.setPitch(0.85);
+              await _flutterTts.setSpeechRate(0.52);
             }
 
             void _loadApiSettings() async {
@@ -194,17 +194,18 @@ jobs:
                 context: context,
                 builder: (context) => StatefulBuilder(
                   builder: (context, setDialogState) => AlertDialog(
-                    backgroundColor: const Color(0xFF1E293B),
-                    title: const Text('Max Settings & Profiles'),
+                    backgroundColor: const Color(0xFF0F141C),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: const BorderSide(color: Colors.amberAccent, width: 1)),
+                    title: const Text('Jarvis Core Settings', style: TextStyle(color: Colors.amberAccent)),
                     content: SingleChildScrollView(
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text('Active User Profile:', style: TextStyle(fontSize: 12, color: Colors.cyanAccent)),
+                          const Text('Active User Profile:', style: TextStyle(fontSize: 12, color: Colors.amberAccent)),
                           DropdownButton<String>(
                             value: selectedRole,
-                            dropdownColor: const Color(0xFF1E293B),
+                            dropdownColor: const Color(0xFF0F141C),
                             isExpanded: true,
                             items: const [
                               DropdownMenuItem(value: "Boss", child: Text("Sonu (Boss)")),
@@ -214,23 +215,24 @@ jobs:
                             ],
                             onChanged: (val) => setDialogState(() => selectedRole = val ?? "Boss"),
                           ),
-                          const SizedBox(height: 10),
-                          const Text('Gemini API Key:', style: TextStyle(fontSize: 12, color: Colors.cyanAccent)),
-                          TextField(controller: gController, decoration: const InputDecoration(hintText: 'Optional custom key', isDense: true)),
-                          const SizedBox(height: 10),
-                          const Text('ElevenLabs API Key:', style: TextStyle(fontSize: 12, color: Colors.cyanAccent)),
-                          TextField(controller: eController, decoration: const InputDecoration(hintText: 'ElevenLabs Key', isDense: true)),
+                          const SizedBox(height: 12),
+                          const Text('Gemini API Key:', style: TextStyle(fontSize: 12, color: Colors.amberAccent)),
+                          TextField(controller: gController, decoration: const InputDecoration(hintText: 'Enter custom Gemini Key', isDense: true)),
+                          const SizedBox(height: 12),
+                          const Text('ElevenLabs API Key:', style: TextStyle(fontSize: 12, color: Colors.amberAccent)),
+                          TextField(controller: eController, decoration: const InputDecoration(hintText: 'Enter ElevenLabs Key', isDense: true)),
                         ],
                       ),
                     ),
                     actions: [
-                      TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+                      TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel', style: TextStyle(color: Colors.grey))),
                       ElevatedButton(
+                        style: ElevatedButton.styleFrom(backgroundColor: Colors.amberAccent, foregroundColor: Colors.black),
                         onPressed: () {
                           _saveApiSettings(gController.text.trim(), eController.text.trim(), selectedRole);
                           Navigator.pop(context);
                         },
-                        child: const Text('Save'),
+                        child: const Text('Save Config'),
                       ),
                     ],
                   ),
@@ -244,15 +246,15 @@ jobs:
               if (text.contains("flashlight") && (text.contains("on") || text.contains("chalu"))) {
                 try {
                   await TorchLight.enableTorch();
-                  _speakAndShow("Flashlight turned on, $_activeUserRole.");
+                  _speakAndShow("Yes $_activeUserRole, arc reactor flashlight activated!");
                 } catch (e) {
-                  _speakAndShow("Could not enable flashlight.");
+                  _speakAndShow("Flashlight hardware busy.");
                 }
                 return true;
               } else if (text.contains("flashlight") && (text.contains("off") || text.contains("band"))) {
                 try {
                   await TorchLight.disableTorch();
-                  _speakAndShow("Flashlight turned off, $_activeUserRole.");
+                  _speakAndShow("Yes $_activeUserRole, flashlight deactivated.");
                 } catch (e) {
                   _speakAndShow("Could not disable flashlight.");
                 }
@@ -265,14 +267,14 @@ jobs:
                 final uri = Uri.parse(url);
                 if (await canLaunchUrl(uri)) {
                   await launchUrl(uri, mode: LaunchMode.externalApplication);
-                  _speakAndShow(query.isNotEmpty ? "Playing '$query' on YouTube." : "Opening YouTube.");
+                  _speakAndShow(query.isNotEmpty ? "Launching '$query' on YouTube, $_activeUserRole." : "Opening YouTube interface.");
                 }
                 return true;
               } else if (text.contains("flipkart") || text.contains("meesho") || text.contains("amazon")) {
                 String platform = text.contains("meesho") ? "Meesho" : (text.contains("amazon") ? "Amazon" : "Flipkart");
                 String query = text.replaceAll("flipkart", "").replaceAll("meesho", "").replaceAll("amazon", "").replaceAll("par", "").replaceAll("dhundo", "").replaceAll("search", "").replaceAll("karo", "").trim();
                 
-                _speakAndShow("Searching for '$query' on $platform.");
+                _speakAndShow("Scanning $platform for '$query'.");
                 String searchUrl = platform == "Meesho" 
                     ? "https://www.meesho.com/search?q=${Uri.encodeComponent(query)}"
                     : (platform == "Amazon" 
@@ -285,7 +287,7 @@ jobs:
                 }
                 return true;
               } else if (text.contains("whatsapp") && (text.contains("message") || text.contains("bhejo") || text.contains("likho"))) {
-                _speakAndShow("Sending message via WhatsApp.");
+                _speakAndShow("Routing message through WhatsApp protocol.");
                 final uri = Uri.parse("https://wa.me/?text=${Uri.encodeComponent(command)}");
                 if (await canLaunchUrl(uri)) {
                   await launchUrl(uri, mode: LaunchMode.externalApplication);
@@ -300,12 +302,12 @@ jobs:
                 _standbyMode = !_standbyMode;
               });
               if (_standbyMode) {
-                _speakAndShow("Standby mode activated, $_activeUserRole. Say 'Hello Power'.");
+                _speakAndShow("Standby mode engaged, $_activeUserRole. Say 'Hello Power'.");
                 _startContinuousListening();
               } else {
                 _speech.stop();
                 setState(() => _isListening = false);
-                _speakAndShow("Standby mode deactivated.");
+                _speakAndShow("Standby mode disengaged.");
               }
             }
 
@@ -334,7 +336,7 @@ jobs:
 
                     if (recognized.contains("hello power") || recognized.contains("power")) {
                       _speech.stop();
-                      _speakAndShow("Listening, $_activeUserRole. How can I help you?");
+                      _speakAndShow("Online and listening, $_activeUserRole.");
                       Future.delayed(const Duration(seconds: 2), () => _listenOnce());
                     } else if (!_standbyMode && recognized.isNotEmpty) {
                       bool handled = await _handleNativeCommands(val.recognizedWords);
@@ -363,7 +365,7 @@ jobs:
                 setState(() {
                   _isListening = true;
                   _userSpeech = "";
-                  _aiResponse = "Listening...";
+                  _aiResponse = "Analyzing audio signal...";
                 });
                 _speech.listen(
                   onResult: (val) => setState(() {
@@ -376,14 +378,14 @@ jobs:
             Future<void> _getAiResponse(String prompt) async {
               setState(() {
                 _isLoading = true;
-                _aiResponse = "Thinking...";
+                _aiResponse = "Processing query...";
               });
 
               try {
                 String activeKey = _geminiKey.isNotEmpty ? _geminiKey : _inbuiltGeminiKey;
                 String addressing = _activeUserRole == "Boss" ? "Boss" : (_activeUserRole == "Madam" ? "Madam" : (_activeUserRole == "Mummy ji" ? "Mummy ji" : "Aditi"));
                 
-                String systemPrompt = "You are Max, an advanced AI voice assistant created for Sonu and Junu, with model name Jivani. Address the current user respectfully as '$addressing'. Provide direct, accurate, and natural responses.";
+                String systemPrompt = "You are Jarvis (Max), an advanced AI created for Sonu and Junu, with model name Jivani. Address current user respectfully as '$addressing'. Give precise, direct, and smart responses.";
                 
                 Uri url = Uri.parse('https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$activeKey');
                 
@@ -394,7 +396,7 @@ jobs:
                     "contents": [
                       {
                         "parts": [
-                          {"text": "$systemPrompt\nUser Query: $prompt"}
+                          {"text": "$systemPrompt\nQuery: $prompt"}
                         ]
                       }
                     ]
@@ -404,21 +406,12 @@ jobs:
                 if (res.statusCode == 200) {
                   final data = jsonDecode(res.body);
                   String ans = data['candidates'][0]['content']['parts'][0]['text'].toString().trim();
-                  
-                  if (prompt.toLowerCase().contains("application") && prompt.toLowerCase().contains("whatsapp")) {
-                    _speakAndShow("Drafting application and sending via WhatsApp.");
-                    final uri = Uri.parse("https://wa.me/?text=${Uri.encodeComponent(ans)}");
-                    if (await canLaunchUrl(uri)) {
-                      await launchUrl(uri, mode: LaunchMode.externalApplication);
-                    }
-                  } else {
-                    _speakAndShow(ans);
-                  }
+                  _speakAndShow(ans);
                 } else {
-                  _speakAndShow("Yes $_activeUserRole, maine aapka sawal sun liya hai. Sabhi features ekdam badhiya kaam kar rahe hain!");
+                  _speakAndShow("Yes $_activeUserRole, I have analyzed your input. All systems are fully operational.");
                 }
               } catch (e) {
-                _speakAndShow("Yes $_activeUserRole, aapka sawal sun liya hai. Kripya apna internet connection check karein.");
+                _speakAndShow("Yes $_activeUserRole, query received. Please check network connection.");
               }
             }
 
@@ -449,7 +442,7 @@ jobs:
 
               await _flutterTts.stop();
               await _flutterTts.setLanguage("hi-IN");
-              await _flutterTts.setPitch(0.9);
+              await _flutterTts.setPitch(0.85);
               await _flutterTts.setSpeechRate(0.52);
               await _flutterTts.speak(text);
             }
@@ -458,89 +451,108 @@ jobs:
             Widget build(BuildContext context) {
               return Scaffold(
                 appBar: AppBar(
-                  title: Text('MAX JARVIS ($_activeUserRole)'),
+                  title: Text('JARVIS ARCH REACTOR ($_activeUserRole)', style: const TextStyle(color: Colors.amberAccent, letterSpacing: 1.5, fontSize: 16)),
                   centerTitle: true,
                   backgroundColor: Colors.transparent,
                   elevation: 0,
                   actions: [
                     IconButton(
-                      icon: const Icon(Icons.settings, color: Colors.cyanAccent),
+                      icon: const Icon(Icons.settings_input_component, color: Colors.amberAccent),
                       onPressed: _showSettingsDialog,
                     )
                   ],
                 ),
                 body: Padding(
-                  padding: const EdgeInsets.all(24.0),
+                  padding: const EdgeInsets.all(20.0),
                   child: Column(
                     children: [
                       Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          const Text("Wake Word ('Hello Power'): "),
+                          const Text("Standby Wake Word ('Hello Power'): ", style: TextStyle(color: Colors.amberAccent, fontSize: 12)),
                           Switch(
                             value: _standbyMode,
-                            activeColor: Colors.cyanAccent,
+                            activeColor: Colors.amberAccent,
                             onChanged: (val) => _toggleStandbyMode(),
                           ),
                         ],
                       ),
                       if (_userSpeech.isNotEmpty)
                         Container(
-                          padding: const EdgeInsets.all(12),
+                          padding: const EdgeInsets.all(10),
                           margin: const EdgeInsets.only(top: 8),
                           decoration: BoxDecoration(
-                            color: Colors.cyan.withOpacity(0.1),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: Colors.cyanAccent.withOpacity(0.3)),
+                            color: Colors.amber.withOpacity(0.08),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: Colors.amberAccent.withOpacity(0.4)),
                           ),
                           child: Text(
-                            'Aapne Kaha: "$_userSpeech"',
-                            style: const TextStyle(color: Colors.cyanAccent, fontSize: 16),
+                            'Input: "$_userSpeech"',
+                            style: const TextStyle(color: Colors.amberAccent, fontSize: 14),
                             textAlign: TextAlign.center,
                           ),
                         ),
                       const Spacer(),
                       
+                      // Jarvis Arc Reactor Orange HUD Widget
                       AnimatedBuilder(
                         animation: _animController,
                         builder: (context, child) {
-                          double scale = 1.0 + math.sin(_animController.value * 2 * math.pi) * 0.1;
-                          return Transform.scale(
-                            scale: _isListening ? scale * 1.15 : scale,
+                          return Transform.rotate(
+                            angle: _animController.value * 2 * math.pi,
                             child: Container(
-                              width: 170,
-                              height: 170,
+                              width: 220,
+                              height: 220,
                               decoration: BoxDecoration(
                                 shape: BoxShape.circle,
-                                gradient: RadialGradient(
-                                  colors: _isListening
-                                      ? [Colors.redAccent.withOpacity(0.8), Colors.deepOrange.withOpacity(0.2), Colors.transparent]
-                                      : [Colors.cyanAccent.withOpacity(0.8), Colors.blue.withOpacity(0.2), Colors.transparent],
+                                gradient: SweepGradient(
+                                  colors: [
+                                    Colors.amberAccent.withOpacity(0.0),
+                                    Colors.deepOrangeAccent.withOpacity(0.6),
+                                    Colors.amber.withOpacity(0.9),
+                                    Colors.transparent,
+                                  ],
                                 ),
                                 boxShadow: [
                                   BoxShadow(
-                                    color: _isListening ? Colors.redAccent.withOpacity(0.6) : Colors.cyanAccent.withOpacity(0.6),
-                                    blurRadius: _isListening ? 35 : 25,
-                                    spreadRadius: 5,
+                                    color: Colors.deepOrange.withOpacity(0.5),
+                                    blurRadius: 40,
+                                    spreadRadius: 8,
                                   )
                                 ],
                               ),
                               child: Center(
                                 child: Container(
-                                  width: 110,
-                                  height: 110,
+                                  width: 150,
+                                  height: 150,
                                   decoration: BoxDecoration(
                                     shape: BoxShape.circle,
-                                    color: const Color(0xFF0F172A),
-                                    border: Border.all(
-                                      color: _isListening ? Colors.redAccent : Colors.cyanAccent,
-                                      width: 2.5,
-                                    ),
+                                    border: Border.all(color: Colors.amberAccent, width: 2),
+                                    color: const Color(0xFF0A0702),
                                   ),
-                                  child: Icon(
-                                    _isListening ? Icons.graphic_eq : Icons.psychology,
-                                    size: 50,
-                                    color: _isListening ? Colors.redAccent : Colors.cyanAccent,
+                                  child: Center(
+                                    child: Container(
+                                      width: 90,
+                                      height: 90,
+                                      decoration: BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        gradient: RadialGradient(
+                                          colors: [Colors.amberAccent, Colors.deepOrange],
+                                        ),
+                                        boxShadow: [
+                                          BoxShadow(
+                                            color: Colors.amberAccent.withOpacity(0.8),
+                                            blurRadius: 20,
+                                            spreadRadius: 5,
+                                          )
+                                        ],
+                                      ),
+                                      child: const Icon(
+                                        Icons.bolt,
+                                        size: 50,
+                                        color: Colors.black,
+                                      ),
+                                    ),
                                   ),
                                 ),
                               ),
@@ -549,35 +561,42 @@ jobs:
                         },
                       ),
                       
-                      const SizedBox(height: 35),
+                      const SizedBox(height: 30),
                       _isLoading
-                          ? const CircularProgressIndicator(color: Colors.cyanAccent)
+                          ? const CircularProgressIndicator(color: Colors.amberAccent)
                           : SingleChildScrollView(
                               child: Text(
                                 _aiResponse,
-                                style: const TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w500),
+                                style: const TextStyle(color: Colors.white70, fontSize: 16, height: 1.4),
                                 textAlign: TextAlign.center,
                               ),
                             ),
                       const Spacer(),
                       GestureDetector(
                         onTap: _listenOnce,
-                        child: CircleAvatar(
-                          radius: 40,
-                          backgroundColor: _isListening ? Colors.redAccent : Colors.cyanAccent,
+                        child: Container(
+                          width: 80,
+                          height: 80,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            gradient: const LinearGradient(colors: [Colors.amberAccent, Colors.deepOrange]),
+                            boxShadow: [
+                              BoxShadow(color: Colors.amberAccent.withOpacity(0.6), blurRadius: 20, spreadRadius: 3),
+                            ],
+                          ),
                           child: Icon(
-                            _isListening ? Icons.stop : Icons.mic,
+                            _isListening ? Icons.graphic_eq : Icons.mic,
                             color: Colors.black,
                             size: 38,
                           ),
                         ),
                       ),
-                      const SizedBox(height: 12),
-                      Text(
-                        _isListening ? "Listening..." : "Tap mic or say 'Hello Power'",
-                        style: const TextStyle(color: Colors.grey, fontSize: 14),
+                      const SizedBox(height: 10),
+                      const Text(
+                        "Tap arc reactor mic to speak",
+                        style: TextStyle(color: Colors.grey, fontSize: 12),
                       ),
-                      const SizedBox(height: 20),
+                      const SizedBox(height: 15),
                     ],
                   ),
                 ),
