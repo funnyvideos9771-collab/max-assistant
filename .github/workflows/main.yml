@@ -36,7 +36,7 @@ jobs:
 
           cat << 'EOF' > pubspec.yaml
           name: max_assistant
-          description: Max AI Jarvis Assistant
+          description: Max AI Jarvis Personal Assistant
           publish_to: 'none'
           version: 1.0.0+1
 
@@ -93,7 +93,7 @@ jobs:
             Widget build(BuildContext context) {
               return MaterialApp(
                 debugShowCheckedModeBanner: false,
-                title: 'MAX JARVIS AI',
+                title: 'JARVIS PERSONAL ASSISTANT',
                 theme: ThemeData.dark().copyWith(
                   scaffoldBackgroundColor: const Color(0xFF030508),
                   colorScheme: const ColorScheme.dark(primary: Colors.amberAccent),
@@ -119,7 +119,7 @@ jobs:
             bool _isLoading = false;
             bool _standbyMode = false;
             String _userSpeech = "";
-            String _aiResponse = "JARVIS ONLINE. Tap mic or say 'Hello Power'.";
+            String _aiResponse = "JARVIS PERSONAL PROTOCOL ONLINE. Awaiting command, Boss.";
             String _activeUserRole = "Boss";
 
             final String _inbuiltGeminiKey = "AIzaSyA4Q9xK1mQ5Lw2z8R7t4Yp6Nc0Jh1Df3G"; 
@@ -196,7 +196,7 @@ jobs:
                   builder: (context, setDialogState) => AlertDialog(
                     backgroundColor: const Color(0xFF0F141C),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: const BorderSide(color: Colors.amberAccent, width: 1)),
-                    title: const Text('Jarvis Core Settings', style: TextStyle(color: Colors.amberAccent)),
+                    title: const Text('Jarvis Personal Config', style: TextStyle(color: Colors.amberAccent)),
                     content: SingleChildScrollView(
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
@@ -217,7 +217,7 @@ jobs:
                           ),
                           const SizedBox(height: 12),
                           const Text('Gemini API Key:', style: TextStyle(fontSize: 12, color: Colors.amberAccent)),
-                          TextField(controller: gController, decoration: const InputDecoration(hintText: 'Enter custom Gemini Key', isDense: true)),
+                          TextField(controller: gController, decoration: const InputDecoration(hintText: 'Enter Gemini Key', isDense: true)),
                           const SizedBox(height: 12),
                           const Text('ElevenLabs API Key:', style: TextStyle(fontSize: 12, color: Colors.amberAccent)),
                           TextField(controller: eController, decoration: const InputDecoration(hintText: 'Enter ElevenLabs Key', isDense: true)),
@@ -232,7 +232,7 @@ jobs:
                           _saveApiSettings(gController.text.trim(), eController.text.trim(), selectedRole);
                           Navigator.pop(context);
                         },
-                        child: const Text('Save Config'),
+                        child: const Text('Save Settings'),
                       ),
                     ],
                   ),
@@ -267,14 +267,14 @@ jobs:
                 final uri = Uri.parse(url);
                 if (await canLaunchUrl(uri)) {
                   await launchUrl(uri, mode: LaunchMode.externalApplication);
-                  _speakAndShow(query.isNotEmpty ? "Launching '$query' on YouTube, $_activeUserRole." : "Opening YouTube interface.");
+                  _speakAndShow(query.isNotEmpty ? "Launching '$query' on YouTube, $_activeUserRole." : "Opening YouTube.");
                 }
                 return true;
               } else if (text.contains("flipkart") || text.contains("meesho") || text.contains("amazon")) {
                 String platform = text.contains("meesho") ? "Meesho" : (text.contains("amazon") ? "Amazon" : "Flipkart");
                 String query = text.replaceAll("flipkart", "").replaceAll("meesho", "").replaceAll("amazon", "").replaceAll("par", "").replaceAll("dhundo", "").replaceAll("search", "").replaceAll("karo", "").trim();
                 
-                _speakAndShow("Scanning $platform for '$query'.");
+                _speakAndShow("Searching $platform for '$query'.");
                 String searchUrl = platform == "Meesho" 
                     ? "https://www.meesho.com/search?q=${Uri.encodeComponent(query)}"
                     : (platform == "Amazon" 
@@ -287,7 +287,7 @@ jobs:
                 }
                 return true;
               } else if (text.contains("whatsapp") && (text.contains("message") || text.contains("bhejo") || text.contains("likho"))) {
-                _speakAndShow("Routing message through WhatsApp protocol.");
+                _speakAndShow("Routing message through WhatsApp.");
                 final uri = Uri.parse("https://wa.me/?text=${Uri.encodeComponent(command)}");
                 if (await canLaunchUrl(uri)) {
                   await launchUrl(uri, mode: LaunchMode.externalApplication);
@@ -365,7 +365,7 @@ jobs:
                 setState(() {
                   _isListening = true;
                   _userSpeech = "";
-                  _aiResponse = "Analyzing audio signal...";
+                  _aiResponse = "Listening for command...";
                 });
                 _speech.listen(
                   onResult: (val) => setState(() {
@@ -378,14 +378,14 @@ jobs:
             Future<void> _getAiResponse(String prompt) async {
               setState(() {
                 _isLoading = true;
-                _aiResponse = "Processing query...";
+                _aiResponse = "Processing personal request...";
               });
 
               try {
                 String activeKey = _geminiKey.isNotEmpty ? _geminiKey : _inbuiltGeminiKey;
                 String addressing = _activeUserRole == "Boss" ? "Boss" : (_activeUserRole == "Madam" ? "Madam" : (_activeUserRole == "Mummy ji" ? "Mummy ji" : "Aditi"));
                 
-                String systemPrompt = "You are Jarvis (Max), an advanced AI created for Sonu and Junu, with model name Jivani. Address current user respectfully as '$addressing'. Give precise, direct, and smart responses.";
+                String systemPrompt = "You are Jarvis, a personal AI assistant created for Sonu and Junu, with model name Jivani. Address current user respectfully as '$addressing'. Provide precise, helpful, and natural responses for all personal tasks.";
                 
                 Uri url = Uri.parse('https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$activeKey');
                 
@@ -396,7 +396,7 @@ jobs:
                     "contents": [
                       {
                         "parts": [
-                          {"text": "$systemPrompt\nQuery: $prompt"}
+                          {"text": "$systemPrompt\nTask: $prompt"}
                         ]
                       }
                     ]
@@ -408,10 +408,10 @@ jobs:
                   String ans = data['candidates'][0]['content']['parts'][0]['text'].toString().trim();
                   _speakAndShow(ans);
                 } else {
-                  _speakAndShow("Yes $_activeUserRole, I have analyzed your input. All systems are fully operational.");
+                  _speakAndShow("Yes $_activeUserRole, your personal request has been processed successfully. All systems are fully operational.");
                 }
               } catch (e) {
-                _speakAndShow("Yes $_activeUserRole, query received. Please check network connection.");
+                _speakAndShow("Yes $_activeUserRole, command received. Please check your network connection.");
               }
             }
 
@@ -451,13 +451,13 @@ jobs:
             Widget build(BuildContext context) {
               return Scaffold(
                 appBar: AppBar(
-                  title: Text('JARVIS ARCH REACTOR ($_activeUserRole)', style: const TextStyle(color: Colors.amberAccent, letterSpacing: 1.5, fontSize: 16)),
+                  title: Text('JARVIS PERSONAL ASSISTANT ($_activeUserRole)', style: const TextStyle(color: Colors.amberAccent, letterSpacing: 1.2, fontSize: 15)),
                   centerTitle: true,
                   backgroundColor: Colors.transparent,
                   elevation: 0,
                   actions: [
                     IconButton(
-                      icon: const Icon(Icons.settings_input_component, color: Colors.amberAccent),
+                      icon: const Icon(Icons.settings_suggest, color: Colors.amberAccent),
                       onPressed: _showSettingsDialog,
                     )
                   ],
@@ -487,14 +487,14 @@ jobs:
                             border: Border.all(color: Colors.amberAccent.withOpacity(0.4)),
                           ),
                           child: Text(
-                            'Input: "$_userSpeech"',
+                            'Command: "$_userSpeech"',
                             style: const TextStyle(color: Colors.amberAccent, fontSize: 14),
                             textAlign: TextAlign.center,
                           ),
                         ),
                       const Spacer(),
                       
-                      // Jarvis Arc Reactor Orange HUD Widget
+                      // Jarvis Orange Arc Reactor HUD
                       AnimatedBuilder(
                         animation: _animController,
                         builder: (context, child) {
@@ -536,7 +536,7 @@ jobs:
                                       height: 90,
                                       decoration: BoxDecoration(
                                         shape: BoxShape.circle,
-                                        gradient: RadialGradient(
+                                        gradient: const RadialGradient(
                                           colors: [Colors.amberAccent, Colors.deepOrange],
                                         ),
                                         boxShadow: [
@@ -593,7 +593,7 @@ jobs:
                       ),
                       const SizedBox(height: 10),
                       const Text(
-                        "Tap arc reactor mic to speak",
+                        "Tap arc reactor to give command",
                         style: TextStyle(color: Colors.grey, fontSize: 12),
                       ),
                       const SizedBox(height: 15),
