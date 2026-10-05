@@ -66,7 +66,7 @@ jobs:
 
           flutter pub get
 
-      - name: Create lib/main.dart with Natural Human Voice & Stable Groq Model
+      - name: Create lib/main.dart with Stable Human Voice & Groq AI
         run: |
           mkdir -p lib
           cat << 'EOF' > lib/main.dart
@@ -248,7 +248,6 @@ jobs:
             Future<bool> _handleNativeCommands(String command) async {
               String text = command.toLowerCase();
 
-              // WhatsApp
               if (text.contains("whatsapp")) {
                 _speakAndShow("WhatsApp open kar raha hoon, $_activeUserRole.");
                 final uri = Uri.parse("whatsapp://");
@@ -260,7 +259,6 @@ jobs:
                 return true;
               }
 
-              // Phone Call
               if (text.contains("call") || text.contains("phone") || text.contains("lagao")) {
                 String target = text.replaceAll("call", "").replaceAll("phone", "").replaceAll("lagao", "").replaceAll("karo", "").replaceAll("ko", "").trim();
                 _speakAndShow("$target ko call laga raha hoon, Boss.");
@@ -274,7 +272,6 @@ jobs:
                 return true;
               }
 
-              // Flashlight
               if (text.contains("flashlight") && (text.contains("on") || text.contains("chalu"))) {
                 try {
                   await TorchLight.enableTorch();
@@ -293,7 +290,6 @@ jobs:
                 return true;
               } 
               
-              // YouTube / Songs (Jaise Hanuman Chalisa)
               else if (text.contains("youtube") || text.contains("gana") || text.contains("play") || text.contains("chalao") || text.contains("chalisa")) {
                 String query = text.replaceAll("youtube", "").replaceAll("gana", "").replaceAll("play", "").replaceAll("chalao", "").replaceAll("par", "").replaceAll("search", "").replaceAll("karo", "").trim();
                 
@@ -314,7 +310,6 @@ jobs:
                 return true;
               } 
               
-              // Shopping
               else if (text.contains("flipkart") || text.contains("meesho") || text.contains("amazon")) {
                 String platform = text.contains("meesho") ? "Meesho" : (text.contains("amazon") ? "Amazon" : "Flipkart");
                 String query = text.replaceAll("flipkart", "").replaceAll("meesho", "").replaceAll("amazon", "").replaceAll("par", "").replaceAll("dhundo", "").replaceAll("search", "").replaceAll("karo", "").trim();
@@ -333,7 +328,6 @@ jobs:
                 return true;
               }
 
-              // Notepad / Writing
               else if (text.contains("notepad") || text.contains("likho") || text.contains("note")) {
                 _speakAndShow("Notepad ya notes open kar raha hoon, $_activeUserRole.");
                 final uri = Uri.parse("https://keep.google.com");
@@ -385,7 +379,7 @@ jobs:
 
                     if (recognized.contains("hello power") || recognized.contains("power")) {
                       _speech.stop();
-                      _speakAndShow("Boliye $_activeUserRice, main sun raha hoon.");
+                      _speakAndShow("Boliye $_activeUserRole, main sun raha hoon.");
                       Future.delayed(const Duration(seconds: 2), () => _listenOnce());
                     } else if (!_standbyMode && recognized.isNotEmpty) {
                       bool handled = await _handleNativeCommands(val.recognizedWords);
@@ -601,7 +595,7 @@ jobs:
                         },
                       ),
                       
-                      const SizedBox(height: 30),
+                      NextSpacer: const SizedBox(height: 30),
                       _isLoading
                           ? const CircularProgressIndicator(color: Colors.amberAccent)
                           : Expanded(
