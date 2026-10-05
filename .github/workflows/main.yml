@@ -41,7 +41,7 @@ jobs:
           version: 1.0.0+1
 
           environment:
-            sdk: '>=3.5.0 <4.0.0'
+            sdk: '>=3.0.0 <4.0.0'
 
           dependencies:
             flutter:
@@ -122,7 +122,7 @@ jobs:
             bool _standbyMode = false;
             String _userSpeech = "";
             String _aiResponse = "Tap mic or say 'Hello Power' in Standby Mode!";
-            String _activeUserRole = "Boss"; // Default Sonu
+            String _activeUserRole = "Boss";
 
             final String _inbuiltGeminiKey = "AIzaSyB3-V9xK1mQ5Lw2z8R7t4Yp6Nc0Jh1Df3G"; 
             String _geminiKey = "";
@@ -311,7 +311,7 @@ jobs:
                         ? "https://www.amazon.in/s?k=${Uri.encodeComponent(query)}"
                         : "https://www.flipkart.com/search?q=${Uri.encodeComponent(query)}");
                 
-                final uri = Uri.parsesearchUrl = Uri.parse(searchUrl);
+                final uri = Uri.parse(searchUrl);
                 if (await canLaunchUrl(uri)) {
                   await launchUrl(uri, mode: LaunchMode.externalApplication);
                 }
