@@ -66,7 +66,7 @@ jobs:
 
           flutter pub get
 
-      - name: Create lib/main.dart with Updated Auth Handling
+      - name: Create lib/main.dart with Dynamic Settings API Key Input
         run: |
           mkdir -p lib
           cat << 'EOF' > lib/main.dart
@@ -118,11 +118,9 @@ jobs:
             bool _isLoading = false;
             bool _standbyMode = false;
             String _userSpeech = "";
-            String _aiResponse = "JARVIS CORE ONLINE. Tap microphone or arc reactor to speak, Boss.";
+            String _aiResponse = "JARVIS CORE ONLINE. Please configure your API key in settings, Boss.";
             String _activeUserRole = "Boss";
-
-            // Aapki nayi format wali key yahan daaliye
-            final String _geminiApiKey = "AQ.Ab8RN6LVtPSqXbr5kPUBdSZUGQmME8VXv4MQjJgWRhHFHLAYeQ";
+            String _groqApiKey = "";
 
             @override
             void initState() {
@@ -166,20 +164,25 @@ jobs:
               SharedPreferences prefs = await SharedPreferences.getInstance();
               setState(() {
                 _activeUserRole = prefs.getString('user_role') ?? "Boss";
+                _groqApiKey = prefs.getString('groq_api_key') ?? "";
               });
             }
 
-            void _saveUserSettings(String role) async {
+            void _saveUserSettings(String role, String apiKey) async {
               SharedPreferences prefs = await SharedPreferences.getInstance();
               await prefs.setString('user_role', role);
+              await prefs.setString('groq_api_key', apiKey);
               setState(() {
                 _activeUserRole = role;
+                _groqApiKey = apiKey;
               });
-              _speakAndShow("Profile updated to $_activeUserRole, Boss.");
+              _speakAndShow("Settings updated successfully, Boss.");
             }
 
             void _showSettingsDialog() {
               String selectedRole = _activeUserRole;
+              TextEditingController keyController = TextEditingController(text: _groqApiKey);
+
               showDialog(
                 context: context,
                 builder: (context) => StatefulBuilder(
@@ -187,33 +190,48 @@ jobs:
                     backgroundColor: const Color(0xFF0C1017),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: const BorderSide(color: Colors.amberAccent, width: 1)),
                     title: const Text('Jarvis Settings', style: TextStyle(color: Colors.amberAccent)),
-                    content: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text('Active User Profile:', style: TextStyle(fontSize: 12, color: Colors.amberAccent)),
-                        DropdownButton<String>(
-                          value: selectedRole,
-                          dropdownColor: const Color(0xFF0C1017),
-                          isExpanded: true,
-                          items: const [
-                            DropdownMenuItem(value: "Boss", child: Text("Sonu (Boss)")),
-                            DropdownMenuItem(value: "Madam", child: Text("Wife (Madam)")),
-                            DropdownMenuItem(value: "Mummy ji", child: Text("Mummy (Mummy ji)")),
-                            DropdownMenuItem(value: "Aditi", child: Text("Daughter (Aditi)")),
-                          ],
-                          onChanged: (val) => setDialogState(() => selectedRole = val ?? "Boss"),
-                        ),
-                        const SizedBox(height: 12),
-                        const Text('API Status: Modern Token Connected', style: TextStyle(fontSize: 11, color: Colors.greenAccent)),
-                      ],
+                    content: SingleChildScrollView(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('Active User Profile:', style: TextStyle(fontSize: 12, color: Colors.amberAccent)),
+                          DropdownButton<String>(
+                            value: selectedRole,
+                            dropdownColor: const Color(0xFF0C1017),
+                            isExpanded: true,
+                            items: const [
+                              DropdownMenuItem(value: "Boss", child: Text("Sonu (Boss)")),
+                              DropdownMenuItem(value: "Madam", child: Text("Wife (Madam)")),
+                              DropdownMenuItem(value: "Mummy ji", child: Text("Mummy (Mummy ji)")),
+                              DropdownMenuItem(value: "Aditi", child: Text("Daughter (Aditi)")),
+                            ],
+                            onChanged: (val) => setDialogState(() => selectedRole = val ?? "Boss"),
+                          ),
+                          const SizedBox(height: 16),
+                          const Text('Groq API Key (gsk_...):', style: TextStyle(fontSize: 12, color: Colors.amberAccent)),
+                          const SizedBox(height: 6),
+                          TextField(
+                            controller: keyController,
+                            obscureText: true,
+                            style: const TextStyle(color: Colors.white, fontSize: 13),
+                            decoration: InputDecoration(
+                              hintText: 'Enter your gsk_... key here',
+                              hintStyle: const TextStyle(color: Colors.grey),
+                              filled: true,
+                              fillColor: const Color(0xFF020406),
+                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Colors.amberAccent)),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                     actions: [
                       TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel', style: TextStyle(color: Colors.grey))),
                       ElevatedButton(
                         style: ElevatedButton.styleFrom(backgroundColor: Colors.amberAccent, foregroundColor: Colors.black),
                         onPressed: () {
-                          _saveUserSettings(selectedRole);
+                          _saveUserSettings(selectedRole, keyController.text.trim());
                           Navigator.pop(context);
                         },
                         child: const Text('Save & Apply'),
@@ -367,44 +385,46 @@ jobs:
             }
 
             Future<void> _getAiResponse(String prompt) async {
+              if (_groqApiKey.isEmpty) {
+                _speakAndShow("Please set your Groq API key in the settings first, Boss.");
+                return;
+              }
+
               setState(() {
                 _isLoading = true;
-                _aiResponse = "Connecting with Gemini AI...";
+                _aiResponse = "Connecting with Jarvis AI...";
               });
 
               try {
                 String addressing = _activeUserRole == "Boss" ? "Boss" : (_activeUserRole == "Madam" ? "Madam" : (_activeUserRole == "Mummy ji" ? "Mummy ji" : "Aditi"));
                 String systemPrompt = "You are Jarvis (Max), an advanced AI assistant created for Sonu and Junu, with model name Jivani. Address current user respectfully as '$addressing'. Give precise, direct, technical, and smart responses for coding, general queries, and tasks.";
                 
-                // Using modern header structure optimized for current Google auth tokens
-                Uri url = Uri.parse('https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent');
+                Uri url = Uri.parse('https://api.groq.com/openai/v1/chat/completions');
                 final res = await http.post(
                   url,
                   headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': 'Bearer $_geminiApiKey',
-                    'X-Goog-Api-Key': _geminiApiKey,
+                    'Authorization': 'Bearer $_groqApiKey',
                   },
                   body: jsonEncode({
-                    "contents": [
-                      {
-                        "parts": [
-                          {"text": "$systemPrompt\nQuery: $prompt"}
-                        ]
-                      }
-                    ]
+                    "model": "llama-3.3-70b-versatile",
+                    "messages": [
+                      {"role": "system", "content": systemPrompt},
+                      {"role": "user", "content": prompt}
+                    ],
+                    "temperature": 0.7
                   }),
                 );
 
                 if (res.statusCode == 200) {
                   final data = jsonDecode(res.body);
-                  String ans = data['candidates'][0]['content']['parts'][0]['text'].toString().trim();
+                  String ans = data['choices'][0]['message']['content'].toString().trim();
                   _speakAndShow(ans);
                 } else {
-                  _speakAndShow("Connected with status code ${res.statusCode}. Processing request.");
+                  _speakAndShow("Error (${res.statusCode}): Please check your API key in settings.");
                 }
               } catch (e) {
-                _speakAndShow("Response generated successfully for $_activeUserRole.");
+                _speakAndShow("Network error occurred, $_activeUserRole.");
               }
             }
 
@@ -431,7 +451,7 @@ jobs:
                   elevation: 0,
                   actions: [
                     IconButton(
-                      icon: const Icon(Icons.settings_input_composite, color: Colors.amberAccent),
+                      icon: const Icon(Icons.settings, color: Colors.amberAccent),
                       onPressed: _showSettingsDialog,
                     )
                   ],
