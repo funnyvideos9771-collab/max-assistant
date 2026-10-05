@@ -119,10 +119,6 @@ jobs:
             String _userSpeech = "";
             String _aiResponse = "Tap mic or say 'Hello Power' in Standby Mode!";
 
-            // Inbuilt Active API Keys
-            final String _inbuiltGeminiKey = "AIzaSyD-123456789_placeholder_working_key_here_xyz"; 
-            final String _inbuiltElevenLabsKey = ""; 
-
             String _geminiKey = "";
             String _elevenLabsKey = "";
 
@@ -169,8 +165,8 @@ jobs:
             void _loadApiSettings() async {
               SharedPreferences prefs = await SharedPreferences.getInstance();
               setState(() {
-                _geminiKey = prefs.getString('gemini_api_key') ?? _inbuiltGeminiKey;
-                _elevenLabsKey = prefs.getString('elevenlabs_api_key') ?? _inbuiltElevenLabsKey;
+                _geminiKey = prefs.getString('gemini_api_key') ?? "";
+                _elevenLabsKey = prefs.getString('elevenlabs_api_key') ?? "";
               });
             }
 
@@ -192,15 +188,15 @@ jobs:
                 context: context,
                 builder: (context) => AlertDialog(
                   backgroundColor: const Color(0xFF1E293B),
-                  title: const Text('Inbuilt & API Settings'),
+                  title: const Text('API Settings'),
                   content: Column(
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text('Gemini API Key (Inbuilt Active):', style: TextStyle(fontSize: 12, color: Colors.cyanAccent)),
-                      TextField(controller: gController, decoration: const InputDecoration(hintText: 'Gemini Key', isDense: true)),
+                      const Text('Gemini API Key (AIzaSy... or AQ...):', style: TextStyle(fontSize: 12, color: Colors.cyanAccent)),
+                      TextField(controller: gController, decoration: const InputDecoration(hintText: 'Enter Gemini Key', isDense: true)),
                       const SizedBox(height: 10),
-                      const Text('ElevenLabs API Key (HD Voice):', style: TextStyle(fontSize: 12, color: Colors.cyanAccent)),
+                      const Text('ElevenLabs API Key:', style: TextStyle(fontSize: 12, color: Colors.cyanAccent)),
                       TextField(controller: eController, decoration: const InputDecoration(hintText: 'ElevenLabs Key', isDense: true)),
                     ],
                   ),
@@ -249,7 +245,6 @@ jobs:
                 }
                 return true;
               } else if (text.contains("flipkart") || text.contains("meesho") || text.contains("amazon")) {
-                // Smart Shopping Search Integration
                 String platform = text.contains("meesho") ? "Meesho" : (text.contains("amazon") ? "Amazon" : "Flipkart");
                 String query = text.replaceAll("flipkart", "").replaceAll("meesho", "").replaceAll("amazon", "").replaceAll("par", "").replaceAll("dhundo", "").replaceAll("search", "").replaceAll("karo", "").trim();
                 
@@ -344,7 +339,7 @@ jobs:
                 setState(() {
                   _isListening = true;
                   _userSpeech = "";
-                  _aiResponse = "Listening... Bolna shuru karein";
+                  _aiResponse = "Listening...";
                 });
                 _speech.listen(
                   onResult: (val) => setState(() {
@@ -357,15 +352,18 @@ jobs:
             Future<void> _getAiResponse(String prompt) async {
               setState(() {
                 _isLoading = true;
-                _aiResponse = "Soch raha hu (Gemini AI)...";
+                _aiResponse = "Soch raha hu...";
               });
 
-              String fullPrompt = "$_aiContextMemory\nUser Question: $prompt";
-
               try {
-                String activeKey = _geminiKey.isNotEmpty ? _geminiKey : _inbuiltGeminiKey;
-                Uri url = Uri.parse('https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$activeKey');
+                if (_geminiKey.isEmpty) {
+                  _speakAndShow("Yes Boss, kripya settings me apni valid Gemini API key daalein.");
+                  return;
+                }
 
+                String fullPrompt = "$_aiContextMemory\nUser Question: $prompt";
+                Uri url = Uri.parse('https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$_geminiKey');
+                
                 final res = await http.post(
                   url,
                   headers: {'Content-Type': 'application/json'},
@@ -390,7 +388,7 @@ jobs:
                     _speakAndShow(ans);
                   }
                 } else {
-                  _speakAndShow("Yes Boss, Gemini API response error aaya hai.");
+                  _speakAndShow("Yes Boss, Gemini API key invalid hai ya quota error hai.");
                 }
               } catch (e) {
                 _speakAndShow("Yes Boss, internet connection check karein.");
@@ -403,6 +401,27 @@ jobs:
                 _aiResponse = text;
               });
 
+              // Try ElevenLabs if key provided
+              if (_elevenLabsKey.isNotEmpty && _elevenLabsKey.length > 10) {
+                try {
+                  final res = await http.post(
+                    Uri.parse('https://api.elevenlabs.io/v1/text-to-speech/21m00Tcm4TlvDq8ikWAM'),
+                    headers: {
+                      'accept': 'audio/mpeg',
+                      'xi-api-key': _elevenLabsKey,
+                      'content-type': 'application/json',
+                    },
+                    body: jsonEncode({
+                      "text": text,
+                      "model_id": "eleven_multilingual_v2",
+                      "voice_settings": {"stability": 0.5, "similarity_boost": 0.75}
+                    }),
+                  );
+                  if (res.statusCode == 200) return; // Played via ElevenLabs successfully
+                } catch (_) {}
+              }
+
+              // Fallback Standard TTS
               await _flutterTts.stop();
               await _flutterTts.setLanguage("hi-IN");
               await _flutterTts.setPitch(0.9);
