@@ -66,7 +66,7 @@ jobs:
 
           flutter pub get
 
-      - name: Create lib/main.dart with Bulletproof Groq Request
+      - name: Create lib/main.dart with Active Groq Model
         run: |
           mkdir -p lib
           cat << 'EOF' > lib/main.dart
@@ -118,7 +118,7 @@ jobs:
             bool _isLoading = false;
             bool _standbyMode = false;
             String _userSpeech = "";
-            String _aiResponse = "JARVIS CORE ONLINE. Please check settings to ensure API key is saved, Boss.";
+            String _aiResponse = "JARVIS CORE ONLINE. Ready for your command, Boss.";
             String _activeUserRole = "Boss";
             String _groqApiKey = "";
 
@@ -408,7 +408,7 @@ jobs:
                     'Authorization': 'Bearer ${_groqApiKey.trim()}',
                   },
                   body: jsonEncode({
-                    "model": "llama3-8b-8192",
+                    "model": "llama-3.1-8b-instant",
                     "messages": [
                       {"role": "system", "content": systemPrompt},
                       {"role": "user", "content": prompt}
