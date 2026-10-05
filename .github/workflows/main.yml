@@ -66,7 +66,7 @@ jobs:
 
           flutter pub get
 
-      - name: Create lib/main.dart with Full Native Automation & Live Chat History
+      - name: Create lib/main.dart with Natural Human Voice & Stable Groq Model
         run: |
           mkdir -p lib
           cat << 'EOF' > lib/main.dart
@@ -122,7 +122,6 @@ jobs:
             String _activeUserRole = "Boss";
             String _groqApiKey = "";
 
-            // Live Chat History for contextual conversation
             final List<Map<String, String>> _chatHistory = [];
 
             @override
@@ -249,73 +248,78 @@ jobs:
             Future<bool> _handleNativeCommands(String command) async {
               String text = command.toLowerCase();
 
-              // WhatsApp Open or Message
+              // WhatsApp
               if (text.contains("whatsapp")) {
-                _speakAndShow("Opening WhatsApp, $_activeUserRole.");
+                _speakAndShow("WhatsApp open kar raha hoon, $_activeUserRole.");
                 final uri = Uri.parse("whatsapp://");
                 if (await canLaunchUrl(uri)) {
                   await launchUrl(uri);
                 } else {
-                  final webUri = Uri.parse("https://wa.me/");
-                  await launchUrl(webUri, mode: LaunchMode.externalApplication);
+                  await launchUrl(Uri.parse("https://wa.me/"), mode: LaunchMode.externalApplication);
                 }
                 return true;
               }
 
-              // Phone Call with Name or Number
+              // Phone Call
               if (text.contains("call") || text.contains("phone") || text.contains("lagao")) {
                 String target = text.replaceAll("call", "").replaceAll("phone", "").replaceAll("lagao", "").replaceAll("karo", "").replaceAll("ko", "").trim();
-                _speakAndShow("Calling $target, Boss.");
+                _speakAndShow("$target ko call laga raha hoon, Boss.");
                 
                 final uri = Uri(scheme: 'tel', path: target);
                 if (await canLaunchUrl(uri)) {
                   await launchUrl(uri);
                 } else {
-                  final dialerUri = Uri.parse("tel:");
-                  await launchUrl(dialerUri);
+                  await launchUrl(Uri.parse("tel:"));
                 }
                 return true;
               }
 
-              // Flashlight Control
+              // Flashlight
               if (text.contains("flashlight") && (text.contains("on") || text.contains("chalu"))) {
                 try {
                   await TorchLight.enableTorch();
-                  _speakAndShow("Yes $_activeUserRole, flashlight activated!");
+                  _speakAndShow("Flashlight on kar di hai, $_activeUserRole.");
                 } catch (e) {
-                  _speakAndShow("Flashlight busy.");
+                  _speakAndShow("Flashlight busy hai, Boss.");
                 }
                 return true;
               } else if (text.contains("flashlight") && (text.contains("off") || text.contains("band"))) {
                 try {
                   await TorchLight.disableTorch();
-                  _speakAndShow("Yes $_activeUserRole, flashlight deactivated.");
+                  _speakAndShow("Flashlight off kar di hai, $_activeUserRole.");
                 } catch (e) {
-                  _speakAndShow("Could not disable flashlight.");
+                  _speakAndShow("Flashlight off nahi ho payi.");
                 }
                 return true;
               } 
               
-              // YouTube Play / Search Song
-              else if (text.contains("youtube") || text.contains("gana") || text.contains("play") || text.contains("chalao")) {
+              // YouTube / Songs (Jaise Hanuman Chalisa)
+              else if (text.contains("youtube") || text.contains("gana") || text.contains("play") || text.contains("chalao") || text.contains("chalisa")) {
                 String query = text.replaceAll("youtube", "").replaceAll("gana", "").replaceAll("play", "").replaceAll("chalao", "").replaceAll("par", "").replaceAll("search", "").replaceAll("karo", "").trim();
+                
+                if (query.isNotEmpty) {
+                  _speakAndShow("YouTube open kar raha hoon, aur '$query' play kar raha hoon, $_activeUserRole.");
+                } else {
+                  _speakAndShow("YouTube open kar raha hoon, Boss.");
+                }
+
                 String url = query.isNotEmpty
                     ? "https://www.youtube.com/results?search_query=${Uri.encodeComponent(query)}"
                     : "https://www.youtube.com";
+                
                 final uri = Uri.parse(url);
                 if (await canLaunchUrl(uri)) {
                   await launchUrl(uri, mode: LaunchMode.externalApplication);
-                  _speakAndShow(query.isNotEmpty ? "Playing '$query' on YouTube, $_activeUserRole." : "Opening YouTube.");
                 }
                 return true;
               } 
               
-              // E-commerce Shopping
+              // Shopping
               else if (text.contains("flipkart") || text.contains("meesho") || text.contains("amazon")) {
                 String platform = text.contains("meesho") ? "Meesho" : (text.contains("amazon") ? "Amazon" : "Flipkart");
                 String query = text.replaceAll("flipkart", "").replaceAll("meesho", "").replaceAll("amazon", "").replaceAll("par", "").replaceAll("dhundo", "").replaceAll("search", "").replaceAll("karo", "").trim();
                 
-                _speakAndShow("Searching $platform for '$query'.");
+                _speakAndShow("$platform par '$query' search kar raha hoon, Boss.");
                 String searchUrl = platform == "Meesho" 
                     ? "https://www.meesho.com/search?q=${Uri.encodeComponent(query)}"
                     : (platform == "Amazon" 
@@ -329,9 +333,9 @@ jobs:
                 return true;
               }
 
-              // Notepad / Writing Application
+              // Notepad / Writing
               else if (text.contains("notepad") || text.contains("likho") || text.contains("note")) {
-                _speakAndShow("Opening browser notepad or search for notes, $_activeUserRole.");
+                _speakAndShow("Notepad ya notes open kar raha hoon, $_activeUserRole.");
                 final uri = Uri.parse("https://keep.google.com");
                 if (await canLaunchUrl(uri)) {
                   await launchUrl(uri, mode: LaunchMode.externalApplication);
@@ -347,12 +351,12 @@ jobs:
                 _standbyMode = !_standbyMode;
               });
               if (_standbyMode) {
-                _speakAndShow("Standby mode engaged, $_activeUserRole. Say 'Hello Power'.");
+                _speakAndShow("Standby mode on ho gaya hai, $_activeUserRole. Jab zaroorat ho, 'Hello Power' bolein.");
                 _startContinuousListening();
               } else {
                 _speech.stop();
                 setState(() => _isListening = false);
-                _speakAndShow("Standby mode disengaged.");
+                _speakAndShow("Standby mode off kar diya hai.");
               }
             }
 
@@ -381,7 +385,7 @@ jobs:
 
                     if (recognized.contains("hello power") || recognized.contains("power")) {
                       _speech.stop();
-                      _speakAndShow("Online and listening, $_activeUserRole.");
+                      _speakAndShow("Boliye $_activeUserRice, main sun raha hoon.");
                       Future.delayed(const Duration(seconds: 2), () => _listenOnce());
                     } else if (!_standbyMode && recognized.isNotEmpty) {
                       bool handled = await _handleNativeCommands(val.recognizedWords);
@@ -410,7 +414,7 @@ jobs:
                 setState(() {
                   _isListening = true;
                   _userSpeech = "";
-                  _aiResponse = "Listening...";
+                  _aiResponse = "Sun raha hoon...";
                 });
                 _speech.listen(
                   onResult: (val) => setState(() {
@@ -422,20 +426,19 @@ jobs:
 
             Future<void> _getAiResponse(String prompt) async {
               if (_groqApiKey.isEmpty) {
-                _speakAndShow("Please set your Groq API key in the settings first, Boss.");
+                _speakAndShow("Pehle settings mein apni Groq API key daaliye, Boss.");
                 return;
               }
 
               setState(() {
                 _isLoading = true;
-                _aiResponse = "Connecting with Jarvis AI...";
+                _aiResponse = "Soch raha hoon...";
               });
 
               try {
                 String addressing = _activeUserRole == "Boss" ? "Boss" : (_activeUserRole == "Madam" ? "Madam" : (_activeUserRole == "Mummy ji" ? "Mummy ji" : "Aditi"));
-                String systemPrompt = "You are Jarvis (Max), an advanced AI assistant created for Sonu and Junu, with model name Jivani. Address current user respectfully as '$addressing'. Give precise, direct, technical, and smart responses for coding, general queries, and tasks.";
+                String systemPrompt = "You are Jarvis (Max), a human-like loyal personal AI assistant created for Sonu and Junu, with model name Jivani. Address current user respectfully as '$addressing'. Speak naturally in conversational Hinglish like a real human assistant, keeping answers crisp, polite, and direct.";
                 
-                // Add to live chat history
                 _chatHistory.add({"role": "user", "content": prompt});
                 
                 List<Map<String, String>> messages = [
@@ -451,7 +454,7 @@ jobs:
                     'Authorization': 'Bearer ${_groqApiKey.trim()}',
                   },
                   body: jsonEncode({
-                    "model": "llama-3.1-8b-instant",
+                    "model": "llama-3-8b-8192",
                     "messages": messages,
                     "temperature": 0.7
                   }),
@@ -461,15 +464,13 @@ jobs:
                   final data = jsonDecode(res.body);
                   String ans = data['choices'][0]['message']['content'].toString().trim();
                   
-                  // Save assistant response to chat history
                   _chatHistory.add({"role": "assistant", "content": ans});
-                  
                   _speakAndShow(ans);
                 } else {
-                  _speakAndShow("Error (${res.statusCode}): ${res.body}");
+                  _speakAndShow("Error (${res.statusCode}): API key ya connection check karein.");
                 }
               } catch (e) {
-                _speakAndShow("Network error occurred, $_activeUserRole.");
+                _speakAndShow("Network error aa gaya hai, $_activeUserRole.");
               }
             }
 
