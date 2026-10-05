@@ -22,16 +22,10 @@ jobs:
         with:
           flutter-version: '3.19.6'
 
-      - name: Create Project and Setup Gradle 8.4
+      - name: Create Project and Setup pubspec.yaml
         run: |
           flutter create . --platforms=android --org com.example.max_assistant --project-name max_assistant
           
-          # Force Gradle wrapper to version 8.4 to resolve all SDK/plugin version mismatches
-          if [ -f "android/gradle/wrapper/gradle-wrapper.properties" ]; then
-            echo "distributionUrl=https\://services.org/distributions/gradle-8.4-bin.zip" > android/gradle/wrapper/gradle-wrapper.properties
-            sed -i 's|https\\://services.gradle.org/distributions/gradle-.*-bin.zip|https\\://services.gradle.org/distributions/gradle-8.4-bin.zip|g' android/gradle/wrapper/gradle-wrapper.properties
-          fi
-
           cat << 'EOF' > pubspec.yaml
           name: max_assistant
           description: Max AI Jarvis Assistant
