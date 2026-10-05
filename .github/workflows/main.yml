@@ -66,7 +66,7 @@ jobs:
 
           flutter pub get
 
-      - name: Create lib/main.dart with Dynamic Settings API Key Input
+      - name: Create lib/main.dart with Fixed Groq Model Endpoint
         run: |
           mkdir -p lib
           cat << 'EOF' > lib/main.dart
@@ -118,7 +118,7 @@ jobs:
             bool _isLoading = false;
             bool _standbyMode = false;
             String _userSpeech = "";
-            String _aiResponse = "JARVIS CORE ONLINE. Please configure your API key in settings, Boss.";
+            String _aiResponse = "JARVIS CORE ONLINE. Please check settings to ensure API key is saved, Boss.";
             String _activeUserRole = "Boss";
             String _groqApiKey = "";
 
@@ -176,7 +176,7 @@ jobs:
                 _activeUserRole = role;
                 _groqApiKey = apiKey;
               });
-              _speakAndShow("Settings updated successfully, Boss.");
+              _speakAndShow("Settings saved successfully, Boss.");
             }
 
             void _showSettingsDialog() {
@@ -407,7 +407,7 @@ jobs:
                     'Authorization': 'Bearer $_groqApiKey',
                   },
                   body: jsonEncode({
-                    "model": "llama-3.3-70b-versatile",
+                    "model": "llama3-8b-8192",
                     "messages": [
                       {"role": "system", "content": systemPrompt},
                       {"role": "user", "content": prompt}
