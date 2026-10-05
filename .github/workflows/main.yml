@@ -24,10 +24,8 @@ jobs:
 
       - name: Generate Clean Project & Modern Gradle Config
         run: |
-          # Initialize clean flutter structure without running standard template generators that break Kotlin
           mkdir -p lib android/app/src/main/res
           
-          # Write pubspec.yaml with all required packages
           cat << 'EOF' > pubspec.yaml
           name: max_assistant
           description: Max AI Jarvis Assistant
@@ -44,7 +42,7 @@ jobs:
             flutter_tts: ^3.8.5
             http: ^1.2.0
             shared_preferences: ^2.2.2
-            torch_light: ^1.1.1
+            torch_light: ^1.1.0
             url_launcher: ^6.2.4
             permission_handler: ^11.3.0
 
@@ -52,7 +50,6 @@ jobs:
             uses-material-design: true
           EOF
 
-          # Write root build.gradle with Kotlin 1.9.22
           cat << 'EOF' > android/build.gradle
           buildscript {
               ext.kotlin_version = '1.9.22'
@@ -86,7 +83,6 @@ jobs:
           }
           EOF
 
-          # Write app/build.gradle with SDK 34 and Kotlin support
           cat << 'EOF' > android/app/build.gradle
           plugins {
               id "com.android.application"
@@ -126,7 +122,6 @@ jobs:
           }
           EOF
 
-          # Write settings.gradle
           cat << 'EOF' > android/settings.gradle
           pluginManagement {
               def flutterSdkPath = {
@@ -160,7 +155,6 @@ jobs:
           include ":app"
           EOF
 
-          # Write AndroidManifest with all required permissions
           cat << 'EOF' > android/app/src/main/AndroidManifest.xml
           <manifest xmlns:android="http://schemas.android.com/apk/res/android"
               package="com.example.max_assistant">
