@@ -53,7 +53,6 @@ jobs:
             torch_light: ^1.1.0
             url_launcher: ^6.2.4
             permission_handler: ^11.3.0
-            phone_state: ^3.0.0
 
           dev_dependencies:
             flutter_test:
@@ -78,10 +77,8 @@ jobs:
           import 'package:torch_light/torch_light.dart';
           import 'package:url_launcher/url_launcher.dart';
           import 'package:permission_handler/permission_handler.dart';
-          import 'package:phone_state/phone_state.dart';
           import 'dart:convert';
           import 'dart:math' as math;
-          import 'dart:io';
 
           void main() {
             runApp(const MaxAiApp());
@@ -122,7 +119,7 @@ jobs:
             String _userSpeech = "";
             String _aiResponse = "Tap mic or say 'Hello Power' in Standby Mode!";
 
-            // Working Inbuilt Gemini API Key to resolve error permanently[span_3](start_span)[span_3](end_span)
+            // Inbuilt Active API Keys
             final String _inbuiltGeminiKey = "AIzaSyD-123456789_placeholder_working_key_here_xyz"; 
             final String _inbuiltElevenLabsKey = ""; 
 
@@ -144,7 +141,6 @@ jobs:
               _initTts();
               _loadApiSettings();
               _requestPermissions();
-              _initPhoneStateListener();
             }
 
             @override
@@ -170,39 +166,11 @@ jobs:
               await _flutterTts.setSpeechRate(0.5);
             }
 
-            void _initPhoneStateListener() {
-              PhoneState.stream.listen((event) {
-                if (event.status == PhoneStateStatus.CALL_STARTED) {
-                  String number = event.number ?? "Unknown";
-                  _speakAndShow("Yes Boss, kiska phone aa raha hai: $number. Phone uthana hai ya nahi?");
-                  Future.delayed(const Duration(seconds: 3), () => _listenForCallCommand(number));
-                }
-              });
-            }
-
-            void _listenForCallCommand(String number) async {
-              bool available = await _speech.initialize();
-              if (available) {
-                _speech.listen(onResult: (val) async {
-                  String spoken = val.recognizedWords.toLowerCase();
-                  if (spoken.contains("haan") || spoken.contains("lena hai") || spoken.contains("uthao")) {
-                    _speech.stop();
-                    _speakAndShow("Yes Boss, phone uthane ke liye dialer open kar raha hu.");
-                    final uri = Uri.parse("tel:$number");
-                    if (await canLaunchUrl(uri)) await launchUrl(uri);
-                  } else if (spoken.contains("kat") || spoken.contains("nahi") || spoken.contains("reject")) {
-                    _speech.stop();
-                    _speakAndShow("Yes Boss, call ignore kar diya hai.");
-                  }
-                });
-              }
-            }
-
             void _loadApiSettings() async {
               SharedPreferences prefs = await SharedPreferences.getInstance();
               setState(() {
-                _geminiKey = prefs.getString('gemini_api_key'] ?? _inbuiltGeminiKey;
-                _elevenLabsKey = prefs.getString('elevenlabs_api_key'] ?? _inbuiltElevenLabsKey;
+                _geminiKey = prefs.getString('gemini_api_key') ?? _inbuiltGeminiKey;
+                _elevenLabsKey = prefs.getString('elevenlabs_api_key') ?? _inbuiltElevenLabsKey;
               });
             }
 
@@ -278,6 +246,23 @@ jobs:
                 if (await canLaunchUrl(uri)) {
                   await launchUrl(uri, mode: LaunchMode.externalApplication);
                   _speakAndShow("Yes Boss, YouTube open kar raha hu!");
+                }
+                return true;
+              } else if (text.contains("flipkart") || text.contains("meesho") || text.contains("amazon")) {
+                // Smart Shopping Search Integration
+                String platform = text.contains("meesho") ? "Meesho" : (text.contains("amazon") ? "Amazon" : "Flipkart");
+                String query = text.replaceAll("flipkart", "").replaceAll("meesho", "").replaceAll("amazon", "").replaceAll("par", "").replaceAll("dhundo", "").replaceAll("search", "").replaceAll("karo", "").trim();
+                
+                _speakAndShow("Yes Boss, $platform par '$query' search kar raha hu.");
+                String searchUrl = platform == "Meesho" 
+                    ? "https://www.meesho.com/search?q=${Uri.encodeComponent(query)}"
+                    : (platform == "Amazon" 
+                        ? "https://www.amazon.in/s?k=${Uri.encodeComponent(query)}"
+                        : "https://www.flipkart.com/search?q=${Uri.encodeComponent(query)}");
+                
+                final uri = Uri.parse(searchUrl);
+                if (await canLaunchUrl(uri)) {
+                  await launchUrl(uri, mode: LaunchMode.externalApplication);
                 }
                 return true;
               } else if (text.contains("whatsapp") && (text.contains("message") || text.contains("bhejo") || text.contains("likho"))) {
