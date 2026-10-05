@@ -22,16 +22,17 @@ jobs:
         with:
           flutter-version: '3.19.6'
 
-      - name: Create Project, Fix Min SDK to 21 & Setup pubspec
+      - name: Create Project, Fix Min SDK to 23 & Setup pubspec
         run: |
           flutter create . --platforms=android --org com.example.max_assistant --project-name max_assistant
           
-          # Fix minSdk to 21 in build.gradle to support modern plugins like permission_handler
+          # Fix minSdk to 23 to support modern permission and device plugins
           GRADLE_FILE="android/app/build.gradle"
           if [ -f "$GRADLE_FILE" ]; then
-            sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 21/g' "$GRADLE_FILE"
-            sed -i 's/minSdkVersion 16/minSdkVersion 21/g' "$GRADLE_FILE"
-            sed -i 's/minSdkVersion 19/minSdkVersion 21/g' "$GRADLE_FILE"
+            sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 23/g' "$GRADLE_FILE"
+            sed -i 's/minSdkVersion 16/minSdkVersion 23/g' "$GRADLE_FILE"
+            sed -i 's/minSdkVersion 19/minSdkVersion 23/g' "$GRADLE_FILE"
+            sed -i 's/minSdkVersion 21/minSdkVersion 23/g' "$GRADLE_FILE"
           fi
 
           cat << 'EOF' > pubspec.yaml
