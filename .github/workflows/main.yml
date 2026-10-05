@@ -22,10 +22,41 @@ jobs:
         with:
           flutter-version: '3.19.6'
 
-      - name: Create Standard Flutter Project & Add Dependencies
+      - name: Create Project and Write pubspec.yaml Directly
         run: |
           flutter create . --platforms=android --org com.example.max_assistant --project-name max_assistant
-          flutter pub add speech_to_text flutter_tts http shared_preferences torch_light^1.1.0 url_launcher permission_handler
+          
+          # Write pubspec.yaml directly to avoid command-line parsing errors
+          cat << 'EOF' > pubspec.yaml
+          name: max_assistant
+          description: Max AI Jarvis Assistant
+          publish_to: 'none'
+          version: 1.0.0+1
+
+          environment:
+            sdk: '>=3.0.0 <4.0.0'
+
+          dependencies:
+            flutter:
+              sdk: flutter
+            speech_to_text: ^6.3.0
+            flutter_tts: ^3.8.5
+            http: ^1.2.0
+            shared_preferences: ^2.2.2
+            torch_light: ^1.1.0
+            url_launcher: ^6.2.4
+            permission_handler: ^11.3.0
+
+          dev_dependencies:
+            flutter_test:
+              sdk: flutter
+            flutter_lints: ^3.0.0
+
+          flutter:
+            uses-material-design: true
+          EOF
+
+          flutter pub get
 
       - name: Create lib/main.dart Code
         run: |
