@@ -53,7 +53,6 @@ jobs:
             torch_light: ^1.1.0
             url_launcher: ^6.2.4
             permission_handler: ^11.3.0
-            audioplayers: ^6.0.0
 
           dev_dependencies:
             flutter_test:
@@ -78,7 +77,6 @@ jobs:
           import 'package:torch_light/torch_light.dart';
           import 'package:url_launcher/url_launcher.dart';
           import 'package:permission_handler/permission_handler.dart';
-          import 'package:audioplayers/audioplayers.dart';
           import 'dart:convert';
           import 'dart:math' as math;
           import 'dart:io';
@@ -114,7 +112,6 @@ jobs:
           class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             late stt.SpeechToText _speech;
             late FlutterTts _flutterTts;
-            late AudioPlayer _audioPlayer;
             late AnimationController _animController;
 
             bool _isListening = false;
@@ -136,7 +133,6 @@ jobs:
               super.initState();
               _speech = stt.SpeechToText();
               _flutterTts = FlutterTts();
-              _audioPlayer = AudioPlayer();
               _animController = AnimationController(
                 vsync: this,
                 duration: const Duration(seconds: 2),
@@ -150,7 +146,6 @@ jobs:
             @override
             void dispose() {
               _animController.dispose();
-              _audioPlayer.dispose();
               super.dispose();
             }
 
@@ -487,44 +482,12 @@ jobs:
                 _aiResponse = text;
               });
 
-              bool elevenPlayed = false;
-              if (_elevenLabsKey.isNotEmpty) {
-                try {
-                  // Default high quality voice ID (Adam or similar)
-                  String voiceId = "21m00Tcm4TlvDq8ikWAM"; 
-                  final url = Uri.parse('https://api.elevenlabs.io/v1/text-to-speech/$voiceId');
-                  final res = await http.post(
-                    url,
-                    headers: {
-                      'Content-Type': 'application/json',
-                      'xi-api-key': _elevenLabsKey,
-                    },
-                    body: jsonEncode({
-                      "text": text,
-                      "model_id": "eleven_multilingual_v2",
-                      "voice_settings": {
-                        "stability": 0.5,
-                        "similarity_boost": 0.75
-                      }
-                    }),
-                  );
-
-                  if (res.statusCode == 200) {
-                    final tempDir = Directory.systemTemp;
-                    final file = File('${tempDir.path}/eleven_audio.mp3');
-                    await file.writeAsBytes(res.bodyBytes);
-                    await _audioPlayer.play(DeviceFileSource(file.path));
-                    elevenPlayed = true;
-                  }
-                } catch (e) {
-                  elevenPlayed = false;
-                }
-              }
-
-              if (!elevenPlayed) {
-                await _flutterTts.stop();
-                await _flutterTts.speak(text);
-              }
+              // Use high quality standard flutter tts with optimized speech parameters for crisp delivery
+              await _flutterTts.stop();
+              await _flutterTts.setLanguage("hi-IN");
+              await _flutterTts.setPitch(0.9);
+              await _flutterTts.setSpeechRate(0.52);
+              await _flutterTts.speak(text);
             }
 
             @override
