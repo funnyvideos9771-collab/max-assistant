@@ -22,11 +22,16 @@ jobs:
         with:
           flutter-version: '3.19.6'
 
-      - name: Create Project and Write pubspec.yaml Directly
+      - name: Create Project and Setup Gradle 8.4
         run: |
           flutter create . --platforms=android --org com.example.max_assistant --project-name max_assistant
           
-          # Write pubspec.yaml directly to avoid command-line parsing errors
+          # Force Gradle wrapper to version 8.4 to resolve all SDK/plugin version mismatches
+          if [ -f "android/gradle/wrapper/gradle-wrapper.properties" ]; then
+            echo "distributionUrl=https\://services.org/distributions/gradle-8.4-bin.zip" > android/gradle/wrapper/gradle-wrapper.properties
+            sed -i 's|https\\://services.gradle.org/distributions/gradle-.*-bin.zip|https\\://services.gradle.org/distributions/gradle-8.4-bin.zip|g' android/gradle/wrapper/gradle-wrapper.properties
+          fi
+
           cat << 'EOF' > pubspec.yaml
           name: max_assistant
           description: Max AI Jarvis Assistant
@@ -118,7 +123,7 @@ jobs:
             String _claudeKey = "";
             String _elevenLabsKey = "";
 
-            final String _aiContextMemory = "Your name is Max, a smart voice assistant. User's name is Sonu. Sonu's best friend is Junu. Speak short, friendly Hindi/Hinglish answers.";
+            final String _aiContextMemory = "Your name is Max, an advanced AI voice assistant. Always address the user respectfully as 'Yes Boss'. Keep your answers short, crisp, and helpful in Hindi/Hinglish.";
 
             @override
             void initState() {
@@ -252,17 +257,17 @@ jobs:
               if (text.contains("flashlight turn on") || text.contains("flashlight on") || text.contains("torch on")) {
                 try {
                   await TorchLight.enableTorch();
-                  _speakAndShow("Flashlight chalu kar di hai Sonu ji!");
+                  _speakAndShow("Yes Boss, flashlight chalu kar di hai!");
                 } catch (e) {
-                  _speakAndShow("Flashlight enable nahi ho saki.");
+                  _speakAndShow("Yes Boss, flashlight enable nahi ho saki.");
                 }
                 return true;
               } else if (text.contains("flashlight turn off") || text.contains("flashlight off") || text.contains("torch off")) {
                 try {
                   await TorchLight.disableTorch();
-                  _speakAndShow("Flashlight band kar di hai!");
+                  _speakAndShow("Yes Boss, flashlight band kar di hai!");
                 } catch (e) {
-                  _speakAndShow("Flashlight disable nahi ho saki.");
+                  _speakAndShow("Yes Boss, flashlight disable nahi ho saki.");
                 }
                 return true;
               } else if (text.contains("youtube") && (text.contains("chalao") || text.contains("open") || text.contains("play"))) {
@@ -273,19 +278,13 @@ jobs:
                 final uri = Uri.parse(url);
                 if (await canLaunchUrl(uri)) {
                   await launchUrl(uri, mode: LaunchMode.externalApplication);
-                  _speakAndShow("YouTube open kar raha hu!");
+                  _speakAndShow("Yes Boss, YouTube open kar raha hu!");
                 }
                 return true;
               } else if (text.contains("call") || text.contains("phone karo")) {
-                if (text.contains("junu")) {
-                  final uri = Uri.parse("tel:");
-                  await launchUrl(uri);
-                  _speakAndShow("Junu ko call dialer open kar diya hai!");
-                } else {
-                  final uri = Uri.parse("tel:");
-                  await launchUrl(uri);
-                  _speakAndShow("Dialer open kar diya hai!");
-                }
+                final uri = Uri.parse("tel:");
+                await launchUrl(uri);
+                _speakAndShow("Yes Boss, dialer open kar diya hai!");
                 return true;
               }
               return false;
@@ -296,12 +295,12 @@ jobs:
                 _standbyMode = !_standbyMode;
               });
               if (_standbyMode) {
-                _speakAndShow("Standby mode ON! Aab 'Hello Power' boliye.");
+                _speakAndShow("Yes Boss, standby mode ON! Ab 'Hello Power' boliye.");
                 _startContinuousListening();
               } else {
                 _speech.stop();
                 setState(() => _isListening = false);
-                _speakAndShow("Standby mode OFF.");
+                _speakAndShow("Yes Boss, standby mode OFF.");
               }
             }
 
@@ -330,7 +329,7 @@ jobs:
 
                     if (recognized.contains("hello power") || recognized.contains("power")) {
                       _speech.stop();
-                      _speakAndShow("Haan Sonu ji, main sun raha hu! Kya madad karu?");
+                      _speakAndShow("Yes Boss, main sun raha hu! Bataiye kya madad karu?");
                       Future.delayed(const Duration(seconds: 2), () => _listenOnce());
                     } else if (!_standbyMode && recognized.isNotEmpty) {
                       bool handled = await _handleNativeCommands(val.recognizedWords);
@@ -380,7 +379,7 @@ jobs:
               try {
                 if (_selectedProvider == "Gemini") {
                   if (_geminiKey.isEmpty) {
-                    _speakAndShow("Settings (⚙️) me Gemini API Key daalein.");
+                    _speakAndShow("Yes Boss, Settings (⚙️) me Gemini API Key daalein.");
                     return;
                   }
                   final url = Uri.parse('https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$_geminiKey');
@@ -397,11 +396,11 @@ jobs:
                     final data = jsonDecode(res.body);
                     _speakAndShow(data['candidates'][0]['content']['parts'][0]['text'].toString().trim());
                   } else {
-                    _speakAndShow("Gemini API Error. Key check karein.");
+                    _speakAndShow("Yes Boss, Gemini API Error. Key check karein.");
                   }
                 } else if (_selectedProvider == "ChatGPT") {
                   if (_chatgptKey.isEmpty) {
-                    _speakAndShow("Settings (⚙️) me ChatGPT API Key daalein.");
+                    _speakAndShow("Yes Boss, Settings (⚙️) me ChatGPT API Key daalein.");
                     return;
                   }
                   final url = Uri.parse('https://api.openai.com/v1/chat/completions');
@@ -422,11 +421,11 @@ jobs:
                     final data = jsonDecode(res.body);
                     _speakAndShow(data['choices'][0]['message']['content'].toString().trim());
                   } else {
-                    _speakAndShow("ChatGPT API Error. Key check karein.");
+                    _speakAndShow("Yes Boss, ChatGPT API Error. Key check karein.");
                   }
                 } else if (_selectedProvider == "Claude") {
                   if (_claudeKey.isEmpty) {
-                    _speakAndShow("Settings (⚙️) me Claude API Key daalein.");
+                    _speakAndShow("Yes Boss, Settings (⚙️) me Claude API Key daalein.");
                     return;
                   }
                   final url = Uri.parse('https://api.anthropic.com/v1/messages');
@@ -449,11 +448,11 @@ jobs:
                     final data = jsonDecode(res.body);
                     _speakAndShow(data['content'][0]['text'].toString().trim());
                   } else {
-                    _speakAndShow("Claude API Error. Key check karein.");
+                    _speakAndShow("Yes Boss, Claude API Error. Key check karein.");
                   }
                 }
               } catch (e) {
-                _speakAndShow("Internet connection error.");
+                _speakAndShow("Yes Boss, internet connection error.");
               }
             }
 
