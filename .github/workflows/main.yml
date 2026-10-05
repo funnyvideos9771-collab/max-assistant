@@ -66,7 +66,7 @@ jobs:
 
           flutter pub get
 
-      - name: Create lib/main.dart with Fixed Groq Model Endpoint
+      - name: Create lib/main.dart with Bulletproof Groq Request
         run: |
           mkdir -p lib
           cat << 'EOF' > lib/main.dart
@@ -170,11 +170,12 @@ jobs:
 
             void _saveUserSettings(String role, String apiKey) async {
               SharedPreferences prefs = await SharedPreferences.getInstance();
+              String cleanedKey = apiKey.trim();
               await prefs.setString('user_role', role);
-              await prefs.setString('groq_api_key', apiKey);
+              await prefs.setString('groq_api_key', cleanedKey);
               setState(() {
                 _activeUserRole = role;
-                _groqApiKey = apiKey;
+                _groqApiKey = cleanedKey;
               });
               _speakAndShow("Settings saved successfully, Boss.");
             }
@@ -231,7 +232,7 @@ jobs:
                       ElevatedButton(
                         style: ElevatedButton.styleFrom(backgroundColor: Colors.amberAccent, foregroundColor: Colors.black),
                         onPressed: () {
-                          _saveUserSettings(selectedRole, keyController.text.trim());
+                          _saveUserSettings(selectedRole, keyController.text);
                           Navigator.pop(context);
                         },
                         child: const Text('Save & Apply'),
@@ -404,7 +405,7 @@ jobs:
                   url,
                   headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': 'Bearer $_groqApiKey',
+                    'Authorization': 'Bearer ${_groqApiKey.trim()}',
                   },
                   body: jsonEncode({
                     "model": "llama3-8b-8192",
@@ -421,7 +422,7 @@ jobs:
                   String ans = data['choices'][0]['message']['content'].toString().trim();
                   _speakAndShow(ans);
                 } else {
-                  _speakAndShow("Error (${res.statusCode}): Please check your API key in settings.");
+                  _speakAndShow("Error (${res.statusCode}): ${res.body}");
                 }
               } catch (e) {
                 _speakAndShow("Network error occurred, $_activeUserRole.");
