@@ -22,17 +22,38 @@ jobs:
         with:
           flutter-version: '3.19.6'
 
-      - name: Setup Project and Dependencies
+      - name: Generate Clean Project & Modern Gradle Config
         run: |
-          rm -rf android lib pubspec.yaml
-          flutter create . --platforms=android --org com.example.max_assistant --project-name max_assistant
-          flutter pub add speech_to_text flutter_tts http shared_preferences torch_light url_launcher permission_handler
+          # Initialize clean flutter structure without running standard template generators that break Kotlin
+          mkdir -p lib android/app/src/main/res
+          
+          # Write pubspec.yaml with all required packages
+          cat << 'EOF' > pubspec.yaml
+          name: max_assistant
+          description: Max AI Jarvis Assistant
+          publish_to: 'none'
+          version: 1.0.0+1
 
-      - name: Force Fix Kotlin Version in build.gradle
-        run: |
-          GRADLE_FILE="android/build.gradle"
-          if [ -f "$GRADLE_FILE" ]; then
-            cat << 'EOF' > "$GRADLE_FILE"
+          environment:
+            sdk: '>=3.0.0 <4.0.0'
+
+          dependencies:
+            flutter:
+              sdk: flutter
+            speech_to_text: ^6.3.0
+            flutter_tts: ^3.8.5
+            http: ^1.2.0
+            shared_preferences: ^2.2.2
+            torch_light: ^1.1.1
+            url_launcher: ^6.2.4
+            permission_handler: ^11.3.0
+
+          flutter:
+            uses-material-design: true
+          EOF
+
+          # Write root build.gradle with Kotlin 1.9.22
+          cat << 'EOF' > android/build.gradle
           buildscript {
               ext.kotlin_version = '1.9.22'
               repositories {
@@ -40,7 +61,7 @@ jobs:
                   mavenCentral()
               }
               dependencies {
-                  classpath 'com.android.tools.build:gradle:7.3.0'
+                  classpath 'com.android.tools.build:gradle:7.4.2'
                   classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
               }
           }
@@ -64,26 +85,117 @@ jobs:
               delete rootProject.buildDir
           }
           EOF
-          fi
 
-          APP_GRADLE="android/app/build.gradle"
-          if [ -f "$APP_GRADLE" ]; then
-            sed -i 's/compileSdkVersion flutter.compileSdkVersion/compileSdkVersion 34/g' "$APP_GRADLE"
-            sed -i 's/targetSdkVersion flutter.targetSdkVersion/targetSdkVersion 34/g' "$APP_GRADLE"
-            sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 21/g' "$APP_GRADLE"
-            sed -i 's/minSdkVersion 16/minSdkVersion 21/g' "$APP_GRADLE"
-            sed -i 's/minSdkVersion 19/minSdkVersion 21/g' "$APP_GRADLE"
-          fi
+          # Write app/build.gradle with SDK 34 and Kotlin support
+          cat << 'EOF' > android/app/build.gradle
+          plugins {
+              id "com.android.application"
+              id "kotlin-android"
+          }
 
-          MANIFEST="android/app/src/main/AndroidManifest.xml"
-          if [ -f "$MANIFEST" ]; then
-            PERMS='<uses-permission android:name="android.permission.RECORD_AUDIO" />\n    <uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.WAKE_LOCK" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />\n    <uses-permission android:name="android.permission.CAMERA" />\n    <uses-permission android:name="android.permission.CALL_PHONE" />'
-            awk -v p="$PERMS" '/<application/{print p}1' $MANIFEST > $MANIFEST.tmp && mv $MANIFEST.tmp $MANIFEST
-          fi
+          android {
+              namespace "com.example.max_assistant"
+              compileSdkVersion 34
+
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+
+              kotlinOptions {
+                  jvmTarget = '17'
+              }
+
+              defaultConfig {
+                  applicationId "com.example.max_assistant"
+                  minSdkVersion 21
+                  targetSdkVersion 34
+                  versionCode 1
+                  versionName "1.0"
+              }
+
+              buildTypes {
+                  release {
+                      signingConfig signingConfigs.debug
+                  }
+              }
+          }
+
+          dependencies {
+              implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.9.22"
+          }
+          EOF
+
+          # Write settings.gradle
+          cat << 'EOF' > android/settings.gradle
+          pluginManagement {
+              def flutterSdkPath = {
+                  def properties = new Properties()
+                  def file = new File('local.properties')
+                  if (file.exists()) {
+                      properties.load(new FileInputStream(file))
+                  }
+                  def flutterSdkPath = properties.getProperty('flutter.sdk')
+                  if (flutterSdkPath == null) {
+                      flutterSdkPath = System.getenv("FLUTTER_ROOT")
+                  }
+                  return flutterSdkPath
+              }()
+
+              includeBuild "$flutterSdkPath/packages/flutter_tools/gradle"
+
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+
+          plugins {
+              id "dev.flutter.flutter-plugin-loader" version "1.0.0"
+              id "com.android.application" version "7.4.2" apply false
+              id "org.jetbrains.kotlin.android" version "1.9.22" apply false
+          }
+
+          include ":app"
+          EOF
+
+          # Write AndroidManifest with all required permissions
+          cat << 'EOF' > android/app/src/main/AndroidManifest.xml
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+              package="com.example.max_assistant">
+              <uses-permission android:name="android.permission.RECORD_AUDIO" />
+              <uses-permission android:name="android.permission.INTERNET" />
+              <uses-permission android:name="android.permission.WAKE_LOCK" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+              <uses-permission android:name="android.permission.CAMERA" />
+              <uses-permission android:name="android.permission.CALL_PHONE" />
+              <application
+                  android:label="Max AI Assistant"
+                  android:name="${applicationName}"
+                  android:icon="@mipmap/ic_launcher">
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true"
+                      android:launchMode="singleTop"
+                      android:theme="@style/LaunchTheme"
+                      android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+                      android:hardwareAccelerated="true"
+                      android:windowSoftInputMode="adjustResize">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN"/>
+                          <category android:name="android.intent.category.LAUNCHER"/>
+                      </intent-filter>
+                  </activity>
+                  <meta-data
+                      android:name="flutterEmbedding"
+                      android:value="2" />
+              </application>
+          </manifest>
+          EOF
 
       - name: Create lib/main.dart Code
         run: |
-          mkdir -p lib
           cat << 'EOF' > lib/main.dart
           import 'package:flutter/material.dart';
           import 'package:speech_to_text/speech_to_text.dart' as stt;
@@ -621,6 +733,9 @@ jobs:
             }
           }
           EOF
+
+      - name: Install dependencies
+        run: flutter pub get
 
       - name: Build APK
         run: flutter build apk --release --no-tree-shake-icons
