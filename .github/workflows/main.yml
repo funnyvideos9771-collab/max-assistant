@@ -1,4 +1,4 @@
-name: Build Jarvis APK
+name: Build Jarvis Agent APK
 
 on:
   push:
@@ -15,7 +15,11 @@ jobs:
       - name: Check lib/main.dart exists
         run: |
           if [ ! -f lib/main.dart ]; then
-            echo "ERROR: lib/main.dart repo mein nahi hai. Dart code ko lib/main.dart naam se upload karein."
+            echo "ERROR: lib/main.dart repo mein nahi hai."
+            exit 1
+          fi
+          if head -n 3 lib/main.dart | grep -qE '^(name:|on:|jobs:|- name:)'; then
+            echo "ERROR: lib/main.dart mein YAML paste ho gaya hai."
             exit 1
           fi
 
@@ -31,17 +35,19 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Create Android project scaffold
+      - name: Create clean Android project in /tmp/jarvis
         run: |
-          cp lib/main.dart /tmp/main.dart.bak
-          flutter create --org com.max --project-name max_jarvis --platforms android .
-          cp /tmp/main.dart.bak lib/main.dart
+          rm -rf /tmp/jarvis
+          flutter create --org com.max --project-name max_jarvis --platforms android /tmp/jarvis
+          cp lib/main.dart /tmp/jarvis/lib/main.dart
 
       - name: Add dependencies
+        working-directory: /tmp/jarvis
         run: |
-          flutter pub add speech_to_text flutter_tts http shared_preferences torch_light url_launcher permission_handler flutter_contacts
+          flutter pub add speech_to_text flutter_tts http shared_preferences torch_light url_launcher permission_handler flutter_contacts android_intent_plus installed_apps:^1.5.0
 
       - name: Patch AndroidManifest permissions
+        working-directory: /tmp/jarvis
         run: |
           python3 - << 'PY'
           p = 'android/app/src/main/AndroidManifest.xml'
@@ -55,12 +61,15 @@ jobs:
               <uses-permission android:name="android.permission.BLUETOOTH"/>
               <uses-permission android:name="android.permission.BLUETOOTH_ADMIN"/>
               <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
+              <uses-permission android:name="com.android.alarm.permission.SET_ALARM"/>
+              <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"/>
               <uses-feature android:name="android.hardware.camera.flash" android:required="false"/>
               <queries>
                   <intent><action android:name="android.speech.RecognitionService"/></intent>
                   <intent><action android:name="android.intent.action.TTS_SERVICE"/></intent>
                   <intent><action android:name="android.intent.action.VIEW"/><data android:scheme="https"/></intent>
                   <intent><action android:name="android.intent.action.VIEW"/><data android:scheme="tel"/></intent>
+                  <intent><action android:name="android.intent.action.VIEW"/><data android:scheme="sms"/></intent>
                   <intent><action android:name="android.intent.action.VIEW"/><data android:scheme="whatsapp"/></intent>
               </queries>
           """
@@ -71,6 +80,7 @@ jobs:
           PY
 
       - name: Set minSdk to 24
+        working-directory: /tmp/jarvis
         run: |
           for f in android/app/build.gradle android/app/build.gradle.kts; do
             if [ -f "$f" ]; then
@@ -79,13 +89,15 @@ jobs:
           done
 
       - name: Get packages
+        working-directory: /tmp/jarvis
         run: flutter pub get
 
       - name: Build release APK
+        working-directory: /tmp/jarvis
         run: flutter build apk --release
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Jarvis-APK
-          path: build/app/outputs/flutter-apk/app-release.apk
+          name: Jarvis-Agent-APK
+          path: /tmp/jarvis/build/app/outputs/flutter-apk/app-release.apk
