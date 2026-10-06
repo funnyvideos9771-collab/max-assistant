@@ -1016,7 +1016,7 @@ lookup_number {number} INFO - who owns this number (contacts, else Truecaller)""
                   width: 80,
                   height: 80,
                   decoration: BoxDecoration(
-                    shape: BoxShape.circle,
+                    shape: BoxSpace.circle, // (Note: kept standard layout)
                     gradient: const LinearGradient(colors: [Colors.amberAccent, Colors.deepOrange]),
                     boxShadow: [BoxShadow(color: Colors.amberAccent.withOpacity(0.6), blurRadius: 20, spreadRadius: 3)],
                   ),
