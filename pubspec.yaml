@@ -1,34 +1,29 @@
-name: Build Flutter APK
+name: max_ai_app
+description: "A new Flutter project."
+publish_to: 'none'
+version: 1.0.0+1
 
-on:
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
+environment:
+  sdk: '>=3.0.0 <4.0.0'
 
-jobs:
-  build:
-    runs-on: ubuntu-latest
+dependencies:
+  flutter:
+    sdk: flutter
+  android_intent_plus: ^5.1.0
+  flutter_contacts: ^1.1.7
+  flutter_tts: ^4.2.2
+  http: ^1.2.0
+  installed_apps: ^2.0.0
+  permission_handler: ^11.3.0
+  shared_preferences: ^2.2.3
+  speech_to_text: ^6.6.2
+  torch_light: ^1.1.0
+  url_launcher: ^6.2.5
 
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
 
-      - name: Set up Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'zulu'
-          java-version: '17'
-
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: '3.19.0'
-          channel: 'stable'
-          cache: true
-
-      - name: Install dependencies
-        run: flutter pub get
-
-      - name: Build APK
-        run: flutter build apk --release
+flutter:
+  uses-material-design: true
