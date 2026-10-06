@@ -22,6 +22,16 @@ jobs:
         with:
           flutter-version: '3.19.6'
 
+      - name: Enable Gradle Caching
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
       - name: Create Project & Setup pubspec
         run: |
           flutter create . --platforms=android --org com.example.max_assistant --project-name max_assistant
@@ -53,6 +63,7 @@ jobs:
             torch_light: ^1.1.0
             url_launcher: ^6.2.4
             permission_handler: ^11.3.0
+            flutter_contacts: ^1.1.7
             intl: ^0.19.0
 
           dev_dependencies:
@@ -66,7 +77,7 @@ jobs:
 
           flutter pub get
 
-      - name: Create lib/main.dart with Clean Syntax
+      - name: Create lib/main.dart with Truecaller-Style Number Lookup Feature
         run: |
           mkdir -p lib
           cat << 'EOF' > lib/main.dart
@@ -78,6 +89,7 @@ jobs:
           import 'package:torch_light/torch_light.dart';
           import 'package:url_launcher/url_launcher.dart';
           import 'package:permission_handler/permission_handler.dart';
+          import 'package:flutter_contacts/flutter_contacts.dart';
           import 'dart:convert';
           import 'dart:math' as math;
 
@@ -245,8 +257,55 @@ jobs:
               );
             }
 
+            Future<void> _lookupNumber(String query) async {
+              // Extract digits or name from query
+              String digits = query.replaceAll(RegExp(r'[^0-9+]'), '');
+              if (digits.isEmpty) {
+                _speakAndShow("Kripya koi valid phone number bolein, Boss.");
+                return;
+              }
+
+              _speakAndShow("Number check kar raha hoon, Boss...");
+
+              if (await FlutterContacts.requestPermission()) {
+                List<Contact> contacts = await FlutterContacts.getContacts(withProperties: true);
+                Contact? matched;
+                for (var c in contacts) {
+                  for (var phone in c.phones) {
+                    if (phone.number.replaceAll(RegExp(r'[^0-9]'), '').contains(digits.replaceAll(RegExp(r'[^0-9]'), ''))) {
+                      matched = c;
+                      break;
+                    }
+                  }
+                  if (matched != null) break;
+                }
+
+                if (matched != null) {
+                  _speakAndShow("Boss, yeh number ${matched.displayName} ka hai.");
+                } else {
+                  // Fallback to Google / Truecaller web search
+                  String searchUrl = "https://www.truecaller.com/search/in/$digits";
+                  final uri = Uri.parse(searchUrl);
+                  if (await canLaunchUrl(uri)) {
+                    await launchUrl(uri, mode: LaunchMode.externalApplication);
+                    _speakAndShow("Contacts mein nahi mila, Truecaller par search open kar diya hai, Boss.");
+                  } else {
+                    _speakAndShow("Yeh number contacts mein nahi mila aur online lookup nahi ho paya.");
+                  }
+                }
+              } else {
+                _speakAndShow("Contacts ki permission nahi mili hai, Boss.");
+              }
+            }
+
             Future<bool> _handleNativeCommands(String command) async {
               String text = command.toLowerCase();
+
+              // Truecaller Number Lookup Feature
+              if (text.contains("number") || text.contains("kiska hai") || text.contains("whose number") || text.contains("detail")) {
+                await _lookupNumber(command);
+                return true;
+              }
 
               if (text.contains("whatsapp")) {
                 _speakAndShow("WhatsApp open kar raha hoon, $_activeUserRole.");
@@ -419,7 +478,10 @@ jobs:
             }
 
             Future<void> _getAiResponse(String prompt) async {
-              if (_groqApiKey.isEmpty) {
+              SharedPreferences prefs = await SharedPreferences.getInstance();
+              String currentKey = (prefs.getString('groq_api_key') ?? "").trim();
+
+              if (currentKey.isEmpty) {
                 _speakAndShow("Pehle settings mein apni Groq API key daaliye, Boss.");
                 return;
               }
@@ -445,7 +507,7 @@ jobs:
                   url,
                   headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': 'Bearer ${_groqApiKey.trim()}',
+                    'Authorization': 'Bearer $currentKey',
                   },
                   body: jsonEncode({
                     "model": "llama-3-8b-8192",
@@ -461,7 +523,7 @@ jobs:
                   _chatHistory.add({"role": "assistant", "content": ans});
                   _speakAndShow(ans);
                 } else {
-                  _speakAndShow("Error (${res.statusCode}): API key ya connection check karein.");
+                  _speakAndShow("Error (${res.statusCode}): ${res.body}");
                 }
               } catch (e) {
                 _speakAndShow("Network error aa gaya hai, $_activeUserRole.");
