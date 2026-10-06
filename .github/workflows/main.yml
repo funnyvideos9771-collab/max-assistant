@@ -26,13 +26,16 @@ jobs:
           flutter-version: '3.22.0'
           channel: 'stable'
 
-      - name: Fix Project Configuration & Get Packages
+      - name: Purge Old Android Structure & Regenerate v2 Embedding
         run: |
-          flutter pub get
+          rm -rf android/
+          flutter create . --platforms=android --org com.example
+
+      - name: Get Dependencies
+        run: flutter pub get
 
       - name: Build Release APK
-        run: |
-          flutter build apk --release --no-pub
+        run: flutter build apk --release --no-pub
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
