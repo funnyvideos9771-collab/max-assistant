@@ -20,7 +20,7 @@ android {
 
     defaultConfig {
         applicationId "com.example.max_assistant"
-        minSdkVersion flutter.minSdkVersion
+        minSdkVersion 21
         targetSdkVersion flutter.targetSdkVersion
         versionCode flutterVersionCode.toInteger()
         versionName flutterVersionName
