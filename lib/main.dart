@@ -58,7 +58,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   bool _isListening = false;
   bool _isLoading = false;
   bool _standbyMode = false;
-  bool _commandMode = false; 
+  bool _commandMode = false; // next final result = command
   bool _speaking = false;
   bool _processing = false;
   bool _starting = false;
@@ -67,7 +67,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   String _userSpeech = "";
   String _aiResponse = "JARVIS CORE ONLINE. Ready for your command, Boss.";
   String _role = "Boss";
-  String _provider = "auto"; 
+  String _provider = "auto"; // auto | gemini | groq
   String _geminiKey = "";
   String _groqKey = "";
   String _aiLabel = "";
@@ -100,6 +100,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     super.dispose();
   }
 
+  // ------------------------------------------------------------------
+  // Setup
+  // ------------------------------------------------------------------
   Future<void> _requestPermissions() async {
     await [
       Permission.microphone,
@@ -157,6 +160,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     await _testKeys();
   }
 
+  // ------------------------------------------------------------------
+  // Speech to text (standby + command)
+  // ------------------------------------------------------------------
   void _onSpeechStatus(String s) {
     if (s == 'done' || s == 'notListening') {
       if (mounted) setState(() => _isListening = false);
@@ -221,13 +227,14 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       return;
     }
 
+    // standby: look for wake word
     final lower = words.toLowerCase();
     for (final w in _wakeWords) {
       final idx = lower.indexOf(w);
       if (idx >= 0) {
         final rest = lower.substring(idx + w.length).trim();
         if (rest.length > 2) {
-          _process(rest);
+          _process(rest); // "hello power youtube par gana chalao"
         } else {
           _say("Boliye $_role, main sun raha hoon.", listenNext: true);
         }
@@ -258,6 +265,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     }
   }
 
+  // ------------------------------------------------------------------
+  // Speak
+  // ------------------------------------------------------------------
   String _clean(String t) => t.replaceAll(RegExp(r'[*#`_~]'), '');
 
   Future<void> _say(String text, {bool listenNext = false}) async {
@@ -274,7 +284,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       await _tts.stop();
       await _tts.speak(_clean(text));
     } catch (_) {}
-    if (gen != _speakGen) return;
+    if (gen != _speakGen) return; // newer message took over
     _speaking = false;
     if (!mounted) return;
     if (listenNext) {
@@ -284,6 +294,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     }
   }
 
+  // ------------------------------------------------------------------
+  // Command routing
+  // ------------------------------------------------------------------
   Future<void> _process(String cmd) async {
     if (_processing) return;
     _processing = true;
@@ -322,17 +335,20 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     final text = command.toLowerCase().trim();
     final digits = _onlyDigits(text);
 
+    // stop talking
     if (_has(text, ['chup', 'stop speaking', 'shut up', 'bas karo'])) {
       await _tts.stop();
       return true;
     }
 
+    // clear memory
     if (_has(text, ['history clear', 'chat clear', 'memory clear', 'sab bhool jao'])) {
       _history.clear();
       _say("Purani baatein bhula di, $_role.");
       return true;
     }
 
+    // time / date
     if (_has(text, ['time kya', 'kitne baje', 'samay kya', 'what time', 'current time'])) {
       final n = DateTime.now();
       final h = n.hour % 12 == 0 ? 12 : n.hour % 12;
@@ -340,7 +356,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       _say("Abhi $h:$m ${n.hour >= 12 ? 'PM' : 'AM'} ho raha hai, $_role.");
       return true;
     }
-    
     if (_has(text, ['aaj ki date', 'aaj ki tarikh', 'today date', "today's date", 'aaj kaun sa din'])) {
       final n = DateTime.now();
       const days = ['Somvar', 'Mangalvar', 'Budhvar', 'Guruvar', 'Shukravar', 'Shanivar', 'Ravivar'];
@@ -348,11 +363,13 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       return true;
     }
 
+    // number lookup (Truecaller-style)
     if (digits.length >= 6 && _has(text, ['kiska', 'whose', 'detail', 'truecaller', 'who is', 'pata', 'check'])) {
       await _lookupNumber(digits);
       return true;
     }
 
+    // call
     if (_has(text, ['call', 'phone', 'lagao', 'dial'])) {
       if (digits.length >= 6) {
         _say("$digits par call laga raha hoon, $_role.");
@@ -363,6 +380,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         'call', 'phone', 'lagao', 'laga', 'karo', 'kar', 'do', 'dial', 'ko', 'ka',
         'number', 'please', 'plz', 'to', 'mummy', 'ji'
       };
+      // keep "mummy" if it is the only word (contact named Mummy)
       final raw = text.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
       var name = raw.where((w) => !filler.contains(w)).join(' ').trim();
       if (name.isEmpty) name = raw.where((w) => !{'call', 'phone', 'lagao', 'laga', 'karo', 'kar', 'do', 'dial', 'ko', 'ka', 'number'}.contains(w)).join(' ').trim();
@@ -387,6 +405,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       return true;
     }
 
+    // whatsapp
     if (text.contains('whatsapp')) {
       _say("WhatsApp open kar raha hoon, $_role.");
       if (!await _open('whatsapp://send', external: false)) {
@@ -395,6 +414,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       return true;
     }
 
+    // flashlight
     if (_has(text, ['flashlight', 'flash light', 'torch', 'tourch'])) {
       final off = _has(text, ['off', 'band', 'bujha', 'bandh']);
       try {
@@ -411,6 +431,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       return true;
     }
 
+    // youtube / songs
     if (_has(text, ['youtube', 'gana', 'gaana', 'song', 'chalisa', 'bhajan']) ||
         (text.contains('play') && !text.contains('display')) ||
         text.contains('chalao')) {
@@ -421,6 +442,44 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       await _open(q.isEmpty
           ? 'https://www.youtube.com'
           : 'https://www.youtube.com/results?search_query=${Uri.encodeComponent(q)}');
+      return true;
+    }
+
+    // shopping
+    if (_has(text, ['flipkart', 'meesho', 'amazon'])) {
+      final platform = text.contains('meesho') ? 'Meesho' : (text.contains('amazon') ? 'Amazon' : 'Flipkart');
+      final q = _stripWords(text, ['flipkart', 'meesho', 'amazon', 'par', 'on', 'dhundo', 'search', 'karo', 'kar', 'do', 'khojo']);
+      final enc = Uri.encodeComponent(q);
+      final url = platform == 'Meesho'
+          ? 'https://www.meesho.com/search?q=$enc'
+          : platform == 'Amazon'
+              ? 'https://www.amazon.in/s?k=$enc'
+              : 'https://www.flipkart.com/search?q=$enc';
+      _say("$platform par '$q' search kar raha hoon, $_role.");
+      await _open(url);
+      return true;
+    }
+
+    // maps
+    if (_has(text, ['navigate', 'rasta', 'map', 'directions', 'kaise jaye', 'kaise jaaye'])) {
+      final q = _stripWords(text, ['navigate', 'rasta', 'map', 'maps', 'directions', 'to', 'ka', 'ko', 'dikhao', 'batao', 'karo', 'kaise', 'jaye', 'jaaye', 'google']);
+      _say("Maps mein '$q' khol raha hoon, $_role.");
+      await _open('https://www.google.com/maps/search/?api=1&query=${Uri.encodeComponent(q)}');
+      return true;
+    }
+
+    // google search
+    if (text.startsWith('google ') || text.contains('google par') || text.contains('search google')) {
+      final q = _stripWords(text, ['google', 'par', 'search', 'karo', 'kar', 'do', 'on']);
+      _say("Google par '$q' search kar raha hoon, $_role.");
+      await _open('https://www.google.com/search?q=${Uri.encodeComponent(q)}');
+      return true;
+    }
+
+    // notes
+    if (_has(text, ['notepad', 'likho', 'note kar'])) {
+      _say("Notes open kar raha hoon, $_role.");
+      await _open('https://keep.google.com');
       return true;
     }
 
@@ -454,6 +513,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     await _open('https://www.truecaller.com/search/in/$last');
   }
 
+  // ------------------------------------------------------------------
+  // AI layer: Gemini + Groq with automatic model discovery
+  // ------------------------------------------------------------------
   String get _systemPrompt =>
       "You are Jarvis (Max), a loyal, human-like personal AI assistant created for Sonu and Junu, model name Jivani. "
       "Address the current user respectfully as '$_role'. Reply in natural conversational Hinglish. "
@@ -525,6 +587,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     return "$who error $code: $short";
   }
 
+  // ---------- Groq ----------
   Future<String> _groqModel({bool refresh = false}) async {
     if (!refresh && _groqModelCache != null) return _groqModelCache!;
     try {
@@ -570,13 +633,14 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       final b = res.body;
       if (attempt == 0 &&
           (res.statusCode == 404 || b.contains('model_not_found') || b.contains('decommissioned'))) {
-        continue;
+        continue; // rediscover model and retry
       }
       throw AiException(_friendly('Groq', res.statusCode, b));
     }
     throw AiException("Groq: koi chalne wala model nahi mila.");
   }
 
+  // ---------- Gemini ----------
   Future<String> _geminiModel({bool refresh = false}) async {
     if (!refresh && _geminiModelCache != null) return _geminiModelCache!;
     try {
@@ -672,6 +736,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     await _say("${out.join('. ')}, $_role.");
   }
 
+  // ------------------------------------------------------------------
+  // Settings dialog
+  // ------------------------------------------------------------------
   void _showSettings() {
     String role = _role;
     String provider = _provider;
@@ -754,6 +821,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
+  // ------------------------------------------------------------------
+  // UI
+  // ------------------------------------------------------------------
   @override
   Widget build(BuildContext context) {
     return Scaffold(
