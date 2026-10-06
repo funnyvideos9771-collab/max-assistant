@@ -1,3 +1,11 @@
+name: max_ai_app
+description: A new Flutter project.
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+
 dependencies:
   flutter:
     sdk: flutter
@@ -11,3 +19,11 @@ dependencies:
   speech_to_text: ^6.6.2
   torch_light: ^1.1.1
   url_launcher: ^6.2.5
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true
