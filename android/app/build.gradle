@@ -1,0 +1,8 @@
+defaultConfig {
+    applicationId "com.example.max_ai_app"
+    minSdkVersion 24
+    targetSdkVersion 34
+    versionCode flutterVersionCode.toInteger()
+    versionName flutterVersionName
+    multiDexEnabled true
+}
