@@ -13,6 +13,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:speech_to_text/speech_recognition_result.dart'; // FIX: error yahi missing import tha
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:torch_light/torch_light.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -130,7 +131,12 @@ class _ShellState extends State<Shell> with SingleTickerProviderStateMixin {
   void initState() {
     super.initState();
     _anim = AnimationController(vsync: this, duration: const Duration(seconds: 8))..repeat();
-    _load();
+    _load().then((_) {
+      // Pehli baar app khule aur koi key na ho to key ka dialog dikhao
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _gKey.isEmpty && _qKey.isEmpty) _setKey(true);
+      });
+    });
     _tts.setLanguage('hi-IN');
     _tts.setSpeechRate(0.5);
     _tts.setPitch(0.95);
@@ -245,7 +251,8 @@ class _ShellState extends State<Shell> with SingleTickerProviderStateMixin {
     return null;
   }
 
-  void _onResult(stt.SpeechRecognitionResult r) {
+  // FIX: pehle 'stt.SpeechRecognitionResult' tha, ab seedha SpeechRecognitionResult
+  void _onResult(SpeechRecognitionResult r) {
     final w = r.recognizedWords.trim();
     if (mounted) setState(() => _status = w);
     if (!r.finalResult || w.isEmpty) return;
@@ -809,8 +816,8 @@ TOOLS: call{to} sms{to,text} whatsapp{to,text} open_app{name,package?} alarm{hou
   }
 
   Future<void> _setKey(bool gem) async {
-    final v = await _prompt(gem ? 'Gemini API Key' : 'Groq API Key', gem ? 'AIza...' : 'gsk_...');
-    if (v == null) return;
+    final v = await _prompt(gem ? 'Gemini API Key' : 'Groq API Key', gem ? 'AQ.xxxxxxxx...' : 'gsk_...');
+    if (v == null || v.isEmpty) return;
     await _put(gem ? 'gkey' : 'qkey', v);
     setState(() {
       if (gem) {
