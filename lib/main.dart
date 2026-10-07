@@ -2,9 +2,11 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
+import 'dart:typed_data';
 import 'dart:ui' show ImageFilter;
 
 import 'package:android_intent_plus/android_intent.dart';
+import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:flutter_tts/flutter_tts.dart';
@@ -13,7 +15,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:speech_to_text/speech_recognition_result.dart'; // FIX: error yahi missing import tha
+import 'package:speech_to_text/speech_recognition_result.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:torch_light/torch_light.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -23,6 +25,7 @@ const _themes = <String, Color>{
   'Cyan Pulse': Color(0xFF19E6D4),
   'Neon Matrix': Color(0xFF2BFF4F),
 };
+const _voices = <String>['Kore', 'Aoede', 'Puck', 'Charon', 'Fenrir'];
 const _apps = <String, String>{
   'whatsapp': 'com.whatsapp', 'instagram': 'com.instagram.android', 'youtube': 'com.google.android.youtube',
   'chrome': 'com.android.chrome', 'gmail': 'com.google.android.gm', 'maps': 'com.google.android.apps.maps',
@@ -45,7 +48,8 @@ const _quotes = <String>[
 
 class AiException implements Exception {
   final String message;
-  AiException(this.message);
+  final String? speak; // chhota version jo bola jaayega
+  AiException(this.message, {this.speak});
 }
 
 void main() {
@@ -111,16 +115,20 @@ class Shell extends StatefulWidget {
 class _ShellState extends State<Shell> with SingleTickerProviderStateMixin {
   final stt.SpeechToText _speech = stt.SpeechToText();
   final FlutterTts _tts = FlutterTts();
+  final AudioPlayer _player = AudioPlayer();
   final TextEditingController _input = TextEditingController();
   late final AnimationController _anim;
 
-  int _tab = 0, _gen = 0;
+  int _tab = 0, _gen = 0, _idle = 0;
   bool _ready = false, _listening = false, _busy = false, _standby = false;
   bool _cmdMode = false, _speaking = false, _starting = false, _teacher = false;
+  bool _gotSpeech = false, _hiOk = false, _natural = true;
+  DateTime _ttsBlockedUntil = DateTime.fromMillisecondsSinceEpoch(0);
   String _status = '', _action = '';
   String _user = 'Boss', _wake = 'power', _provider = 'auto', _gKey = '', _qKey = '';
-  String _themeName = 'Crimson Core', _wall = '';
-  String? _gModel, _qModel;
+  String _themeName = 'Crimson Core', _wall = '', _voice = 'Kore';
+  String? _qModel;
+  List<String>? _gList;
   List<Contact>? _contactsCache;
   List<String> _memory = [], _notes = [];
   List<Map<String, String>> _chat = [];
@@ -132,16 +140,30 @@ class _ShellState extends State<Shell> with SingleTickerProviderStateMixin {
     super.initState();
     _anim = AnimationController(vsync: this, duration: const Duration(seconds: 8))..repeat();
     _load().then((_) {
-      // Pehli baar app khule aur koi key na ho to key ka dialog dikhao
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted && _gKey.isEmpty && _qKey.isEmpty) _setKey(true);
       });
     });
-    _tts.setLanguage('hi-IN');
-    _tts.setSpeechRate(0.5);
-    _tts.setPitch(0.95);
-    _tts.awaitSpeakCompletion(true);
+    _initTts();
     [Permission.microphone, Permission.camera, Permission.phone, Permission.contacts].request();
+  }
+
+  Future<void> _initTts() async {
+    try {
+      await _tts.setLanguage('hi-IN');
+      await _tts.setSpeechRate(0.45);
+      await _tts.setPitch(1.0);
+      await _tts.awaitSpeakCompletion(true);
+      final vs = await _tts.getVoices as List?;
+      if (vs != null) {
+        final hi = vs.where((v) => '${v['locale']}'.toLowerCase().replaceAll('_', '-') == 'hi-in').toList();
+        hi.sort((a, b) =>
+            ('${b['name']}'.contains('network') ? 1 : 0) - ('${a['name']}'.contains('network') ? 1 : 0));
+        if (hi.isNotEmpty) {
+          await _tts.setVoice({'name': '${hi.first['name']}', 'locale': '${hi.first['locale']}'});
+        }
+      }
+    } catch (_) {}
   }
 
   @override
@@ -150,6 +172,7 @@ class _ShellState extends State<Shell> with SingleTickerProviderStateMixin {
     _input.dispose();
     _speech.stop();
     _tts.stop();
+    _player.dispose();
     super.dispose();
   }
 
@@ -165,6 +188,8 @@ class _ShellState extends State<Shell> with SingleTickerProviderStateMixin {
       _qKey = (p.getString('qkey') ?? '').trim();
       _themeName = p.getString('theme') ?? 'Crimson Core';
       _wall = p.getString('wall') ?? '';
+      _natural = p.getBool('natural') ?? true;
+      _voice = p.getString('voice') ?? 'Kore';
       _memory = p.getStringList('memory') ?? [];
       _notes = p.getStringList('notes') ?? [];
       _chat = (p.getStringList('chat') ?? [])
@@ -178,6 +203,11 @@ class _ShellState extends State<Shell> with SingleTickerProviderStateMixin {
     await p.setString(k, v);
   }
 
+  Future<void> _putBool(String k, bool v) async {
+    final p = await SharedPreferences.getInstance();
+    await p.setBool(k, v);
+  }
+
   Future<void> _putList(String k, List<String> v) async {
     final p = await SharedPreferences.getInstance();
     await p.setStringList(k, v);
@@ -186,17 +216,26 @@ class _ShellState extends State<Shell> with SingleTickerProviderStateMixin {
   Future<void> _saveChat() =>
       _putList('chat', _chat.skip(math.max(0, _chat.length - 100)).map((m) => jsonEncode(m)).toList());
 
-  // ------------------------------------------------------------- speech
+  // ------------------------------------------------------------- speech (mic)
   void _onStatus(String s) {
     if (s == 'done' || s == 'notListening') {
       if (mounted) setState(() => _listening = false);
-      _restart(const Duration(milliseconds: 400));
+      if (_standby && !_gotSpeech && !_speaking && !_busy && !_starting) {
+        _idle++;
+        if (_idle >= 3) {
+          // 3 baar kuch nahi bola -> voice mode khud band (beep loop rokne ke liye)
+          if (mounted) setState(() => _standby = false);
+          _idle = 0;
+          return;
+        }
+      }
+      _restart(const Duration(milliseconds: 800));
     }
   }
 
   void _onError(dynamic e) {
     if (mounted) setState(() => _listening = false);
-    _restart(const Duration(milliseconds: 1500));
+    _restart(const Duration(milliseconds: 2000));
   }
 
   void _restart(Duration d) {
@@ -209,28 +248,34 @@ class _ShellState extends State<Shell> with SingleTickerProviderStateMixin {
   }
 
   Future<void> _listen({required bool command}) async {
-    if (_starting) return;
+    if (_starting || _speaking) return;
     if (!_ready) {
       try {
         _ready = await _speech.initialize(onStatus: _onStatus, onError: _onError);
+        if (_ready) {
+          final ls = await _speech.locales();
+          _hiOk = ls.any((l) => l.localeId.replaceAll('-', '_') == 'hi_IN');
+        }
       } catch (_) {
         _ready = false;
       }
     }
     if (!_ready) {
+      if (mounted) setState(() => _standby = false);
       _say('Mic ya speech permission nahi mili, $_user.');
       return;
     }
     if (_speech.isListening) return;
     _starting = true;
     _cmdMode = command;
+    _gotSpeech = false;
     if (command && mounted) setState(() => _status = 'Sun raha hoon...');
     try {
       await _speech.listen(
         onResult: _onResult,
-        localeId: 'en_IN',
-        listenFor: Duration(seconds: command ? 20 : 60),
-        pauseFor: Duration(seconds: command ? 3 : 4),
+        localeId: (_hiOk && !_teacher) ? 'hi_IN' : 'en_IN',
+        listenFor: const Duration(seconds: 30),
+        pauseFor: const Duration(seconds: 3),
         listenOptions: stt.SpeechListenOptions(partialResults: true, cancelOnError: false),
       );
       if (mounted) setState(() => _listening = true);
@@ -251,59 +296,152 @@ class _ShellState extends State<Shell> with SingleTickerProviderStateMixin {
     return null;
   }
 
-  // FIX: pehle 'stt.SpeechRecognitionResult' tha, ab seedha SpeechRecognitionResult
   void _onResult(SpeechRecognitionResult r) {
+    if (_speaking || _busy) return; // AI bol raha ho to apni awaaz mat suno
     final w = r.recognizedWords.trim();
     if (mounted) setState(() => _status = w);
     if (!r.finalResult || w.isEmpty) return;
-    if (_cmdMode) {
+    _gotSpeech = true;
+    _idle = 0;
+    if (_cmdMode || _standby) {
       _cmdMode = false;
-      _process(w);
-      return;
-    }
-    final rest = _afterWake(w.toLowerCase());
-    if (rest == null) return;
-    if (rest.length > 2) {
-      _process(rest);
-    } else {
-      _say('Boliye $_user, main sun raha hoon.', next: true);
+      final rest = _afterWake(w.toLowerCase());
+      _process(rest != null && rest.length > 2 ? rest : w);
     }
   }
 
   void _toggleStandby() {
+    _idle = 0;
     setState(() => _standby = !_standby);
     if (_standby) {
-      _say("Standby on ho gaya, $_user. 'Hey $_wake' bolkar bulaiye.");
+      _say('Voice mode on hai, $_user. Bolo, main sun raha hoon.');
     } else {
+      _gen++;
       _cmdMode = false;
+      _speaking = false;
       _speech.stop();
+      _stopVoice();
       setState(() => _listening = false);
-      _say('Standby off kar diya.');
     }
   }
 
-  void _mic() {
+  Future<void> _mic() async {
     if (_speech.isListening) {
       _cmdMode = false;
       _speech.stop();
     } else {
-      _tts.stop();
+      _gen++;
+      _speaking = false;
+      await _stopVoice();
       _listen(command: true);
     }
   }
 
-  Future<void> _say(String text, {bool next = false}) async {
+  // ------------------------------------------------------------- voice (speaker)
+  Future<void> _stopVoice() async {
+    try {
+      await _tts.stop();
+    } catch (_) {}
+    try {
+      await _player.stop();
+    } catch (_) {}
+  }
+
+  Uint8List _wav(Uint8List pcm, {int rate = 24000}) {
+    final h = ByteData(44);
+    void s(int o, String t) {
+      for (var i = 0; i < 4; i++) {
+        h.setUint8(o + i, t.codeUnitAt(i));
+      }
+    }
+
+    s(0, 'RIFF');
+    h.setUint32(4, 36 + pcm.length, Endian.little);
+    s(8, 'WAVE');
+    s(12, 'fmt ');
+    h.setUint32(16, 16, Endian.little);
+    h.setUint16(20, 1, Endian.little);
+    h.setUint16(22, 1, Endian.little);
+    h.setUint32(24, rate, Endian.little);
+    h.setUint32(28, rate * 2, Endian.little);
+    h.setUint16(32, 2, Endian.little);
+    h.setUint16(34, 16, Endian.little);
+    s(36, 'data');
+    h.setUint32(40, pcm.length, Endian.little);
+    return Uint8List.fromList([...h.buffer.asUint8List(), ...pcm]);
+  }
+
+  /// Gemini ki natural awaaz. false = fail hua, phone TTS use hoga.
+  Future<bool> _geminiSpeak(String text, int g) async {
+    if (_gKey.isEmpty || !_natural || DateTime.now().isBefore(_ttsBlockedUntil) || text.trim().isEmpty) return false;
+    try {
+      final res = await http
+          .post(
+            Uri.parse(
+                'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent'),
+            headers: {'Content-Type': 'application/json', 'x-goog-api-key': _gKey},
+            body: jsonEncode({
+              'contents': [
+                {
+                  'parts': [
+                    {'text': 'Say this in a warm, natural, relaxed conversational tone like a real friend talking: $text'}
+                  ]
+                }
+              ],
+              'generationConfig': {
+                'responseModalities': ['AUDIO'],
+                'speechConfig': {
+                  'voiceConfig': {
+                    'prebuiltVoiceConfig': {'voiceName': _voice}
+                  }
+                },
+              },
+            }),
+          )
+          .timeout(const Duration(seconds: 25));
+      if (res.statusCode == 429) {
+        _ttsBlockedUntil = DateTime.now().add(const Duration(minutes: 2));
+        return false;
+      }
+      if (res.statusCode != 200) return false;
+      final parts = jsonDecode(res.body)['candidates']?[0]?['content']?['parts'] as List?;
+      final part = parts?.firstWhere((p) => p is Map && p['inlineData'] != null, orElse: () => null);
+      final b64 = part?['inlineData']?['data'];
+      if (b64 == null) return false;
+      if (g != _gen) return true; // beech me user ne rok diya
+      final dir = await getTemporaryDirectory();
+      final f = File('${dir.path}/max_tts_$g.wav');
+      await f.writeAsBytes(_wav(base64Decode(b64.toString())), flush: true);
+      final done = Completer<void>();
+      final sub = _player.onPlayerStateChanged.listen((st) {
+        if ((st == PlayerState.completed || st == PlayerState.stopped) && !done.isCompleted) done.complete();
+      });
+      await _player.play(DeviceFileSource(f.path));
+      await done.future.timeout(const Duration(seconds: 90), onTimeout: () {});
+      await sub.cancel();
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> _say(String text, {String? show, bool next = false}) async {
     final g = ++_gen;
-    if (mounted) setState(() => _status = text);
+    if (mounted) setState(() => _status = show ?? text);
     _speaking = true;
+    final clean = text.replaceAll(RegExp(r'[*#`_~]'), '');
     try {
       if (_speech.isListening) await _speech.stop();
-      await _tts.stop();
-      await _tts.speak(text.replaceAll(RegExp(r'[*#`_~]'), ''));
+      await _stopVoice();
+      final ok = await _geminiSpeak(clean, g);
+      if (!ok && g == _gen) await _tts.speak(clean);
     } catch (_) {}
     if (g != _gen) return;
     _speaking = false;
     if (!mounted) return;
+    // echo khatam hone do, tabhi mic on karo
+    await Future.delayed(const Duration(milliseconds: 700));
+    if (g != _gen || !mounted) return;
     if (next) {
       _listen(command: true);
     } else if (_standby) {
@@ -312,10 +450,20 @@ class _ShellState extends State<Shell> with SingleTickerProviderStateMixin {
   }
 
   // -------------------------------------------------------------- agent
-  String get _sys => """You are MAX, a loyal, smart personal AI agent living inside the user's Android phone. The user is called '$_user'. Now: ${DateTime.now().toIso8601String()} (IST).
-Reply in natural Hinglish; 'say' is spoken aloud: max 3 short sentences, no markdown.${_teacher ? ' MODE English Teacher: reply in simple English, gently correct the user mistakes and ask one follow-up question.' : ''}
+  String get _sys => """You are MAX, ${_user}'s close, witty, caring friend who also lives inside their Android phone and can control it. Now: ${DateTime.now().toIso8601String()} (IST).
+
+PERSONALITY AND STYLE:
+- Talk like a real human friend in natural Hinglish (Roman script), never like a robot or customer-care bot. Never say "As an AI". No lists, no markdown, no emojis.
+- First understand exactly what ${_user} asked, then answer THAT directly with a real, useful answer. If it is casual talk, reply like a friend with some feeling and personality.
+- Usually 2 to 4 short natural sentences, because 'say' is spoken aloud. Use natural fillers sometimes (acha, dekho, hmm, arre, waise). Match the user's mood. Occasionally end with a short follow-up question.
+- If the request is unclear, ask ONE short clarifying question.
+- Use the earlier conversation for context; never repeat yourself.
+- For facts that change (news, scores, prices, weather) use a tool, do not guess.
+- The user's speech may come in Devanagari or Roman; always write tool args in English/Roman letters (e.g. app name "whatsapp").${_teacher ? '\n- MODE English Teacher: reply in simple English, gently correct the user\'s mistakes, and ask one follow-up question.' : ''}
+
 Long-term memory: ${_memory.isEmpty ? 'none' : _memory.join('; ')}
-Reply with ONLY one JSON object: {"action":"<tool or none>","args":{},"say":"<speech>"}. Use "none" to chat or to ask for a missing detail. INFO tools return a TOOL_RESULT, then answer with action "none". Never invent phone numbers.
+
+OUTPUT FORMAT: reply with ONLY one plain-text JSON object (do NOT use any function-calling API): {"action":"<tool or none>","args":{},"say":"<speech>"}. Use "none" to chat or to ask for a missing detail. INFO tools return a TOOL_RESULT, then answer with action "none". Never invent phone numbers.
 TOOLS: call{to} sms{to,text} whatsapp{to,text} open_app{name,package?} alarm{hour,minute,label} flashlight{state:on|off} youtube{query} maps{query} shop{platform:flipkart|amazon|meesho,query} open_url{url} remember{fact} save_note{text} read_notes{}INFO weather{city}INFO web_search{query}INFO now{}INFO lookup_number{number}INFO""";
 
   Map<String, dynamic>? _json(String raw) {
@@ -332,7 +480,9 @@ TOOLS: call{to} sms{to,text} whatsapp{to,text} open_app{name,package?} alarm{hou
   Future<void> _process(String text, {bool mission = false}) async {
     if (_busy || text.trim().isEmpty) return;
     if (RegExp(r'\b(chup|stop speaking|bas karo)\b').hasMatch(text.toLowerCase())) {
-      await _tts.stop();
+      _gen++;
+      _speaking = false;
+      await _stopVoice();
       return;
     }
     if (_gKey.isEmpty && _qKey.isEmpty) {
@@ -345,13 +495,14 @@ TOOLS: call{to} sms{to,text} whatsapp{to,text} open_app{name,package?} alarm{hou
       _action = '';
     });
     final msgs = <Map<String, String>>[
-      for (final m in _chat.reversed.take(8).toList().reversed) {'role': m['role'] ?? 'user', 'content': m['text'] ?? ''},
+      for (final m in _chat.reversed.take(12).toList().reversed) {'role': m['role'] ?? 'user', 'content': m['text'] ?? ''},
       {'role': 'user', 'content': text},
     ];
     while (msgs.length > 1 && msgs.first['role'] != 'user') {
       msgs.removeAt(0);
     }
     String say = '', last = '';
+    String? shown;
     try {
       for (var i = 0; i < (mission ? 8 : 4); i++) {
         final raw = await _llm(msgs);
@@ -380,12 +531,13 @@ TOOLS: call{to} sms{to,text} whatsapp{to,text} open_app{name,package?} alarm{hou
       _chat.add({'role': 'assistant', 'text': say});
       _saveChat();
     } on AiException catch (e) {
-      say = e.message;
+      say = e.speak ?? e.message;
+      shown = e.message;
     } catch (_) {
       say = 'Network error aa gaya hai, $_user.';
     }
     if (mounted) setState(() => _busy = false);
-    await _say(say);
+    await _say(say, show: shown);
   }
 
   // -------------------------------------------------------------- tools
@@ -600,7 +752,7 @@ TOOLS: call{to} sms{to,text} whatsapp{to,text} open_app{name,package?} alarm{hou
     if (q.isEmpty) return 'Kya search karna hai?';
     if (_gKey.isNotEmpty) {
       try {
-        final model = await _gemModel();
+        final model = (await _gemCandidates()).first;
         final res = await http
             .post(
               Uri.parse('https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent'),
@@ -640,25 +792,26 @@ TOOLS: call{to} sms{to,text} whatsapp{to,text} open_app{name,package?} alarm{hou
       if (_gKey.isNotEmpty) 'gemini',
       if (_qKey.isNotEmpty && _provider != 'groq') 'groq',
     ];
-    String err = 'API key nahi mili.';
+    final errs = <String>[];
     for (final p in order.toSet()) {
       try {
         return p == 'gemini' ? await _gemini(msgs) : await _groq(msgs);
       } on AiException catch (e) {
-        err = e.message;
+        errs.add(e.message);
       } catch (_) {
-        err = '${p == 'gemini' ? 'Gemini' : 'Groq'}: network error.';
+        errs.add('${p == 'gemini' ? 'Gemini' : 'Groq'}: network error.');
       }
     }
-    throw AiException(err);
+    throw AiException(errs.isEmpty ? 'API key nahi mili.' : errs.join('\n'),
+        speak: 'AI se jawab nahi mil paaya, $_user. Screen par error likha hai.');
   }
 
   String _friendly(String who, int code, String body) {
     if (code == 401 || code == 403 || body.contains('API key not valid')) {
-      return '$who API key galat hai ya access nahi hai (code $code).';
+      return '$who: API key galat hai ya access nahi hai (code $code).';
     }
-    if (code == 429) return '$who ki limit khatam ho gayi, thodi der baad try karein.';
-    return '$who error $code: ${body.length > 140 ? body.substring(0, 140) : body}';
+    if (code == 429) return '$who: limit khatam ho gayi (429), thodi der baad try karein.';
+    return '$who error $code: ${body.length > 160 ? body.substring(0, 160) : body}';
   }
 
   Future<String> _grqModel({bool fresh = false}) async {
@@ -680,8 +833,9 @@ TOOLS: call{to} sms{to,text} whatsapp{to,text} open_app{name,package?} alarm{hou
     return _qModel = 'llama-3.1-8b-instant';
   }
 
-  Future<String> _groq(List<Map<String, String>> msgs, {String? sys}) async {
-    for (int attempt = 0; attempt < 2; attempt++) {
+  Future<String> _groq(List<Map<String, String>> msgs, {String? sys, bool json = true}) async {
+    var extra = '';
+    for (int attempt = 0; attempt < 3; attempt++) {
       final model = await _grqModel(fresh: attempt == 1);
       final res = await http
           .post(
@@ -689,9 +843,11 @@ TOOLS: call{to} sms{to,text} whatsapp{to,text} open_app{name,package?} alarm{hou
             headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer $_qKey'},
             body: jsonEncode({
               'model': model,
-              'temperature': 0.4,
+              'temperature': 0.7,
+              'max_tokens': 700,
+              if (json) 'response_format': {'type': 'json_object'},
               'messages': [
-                {'role': 'system', 'content': sys ?? _sys},
+                {'role': 'system', 'content': '${sys ?? _sys}$extra'},
                 ...msgs,
               ],
             }),
@@ -700,17 +856,28 @@ TOOLS: call{to} sms{to,text} whatsapp{to,text} open_app{name,package?} alarm{hou
       if (res.statusCode == 200) {
         return jsonDecode(res.body)['choices'][0]['message']['content'].toString().trim();
       }
+      if (res.body.contains('tool_use_failed') || res.body.contains('failed_generation')) {
+        extra = '\nIMPORTANT: Never call functions/tools through the API. Output only a plain JSON text object.';
+        continue;
+      }
       if (attempt == 0 &&
           (res.statusCode == 404 || res.body.contains('model_not_found') || res.body.contains('decommissioned'))) {
         continue;
       }
       throw AiException(_friendly('Groq', res.statusCode, res.body));
     }
-    throw AiException('Groq: koi chalne wala model nahi mila.');
+    throw AiException('Groq: model ne baar-baar tool call kiya, dobara try karein.');
   }
 
-  Future<String> _gemModel({bool fresh = false}) async {
-    if (!fresh && _gModel != null) return _gModel!;
+  Future<List<String>> _gemCandidates({bool fresh = false}) async {
+    if (!fresh && _gList != null) return _gList!;
+    const pref = [
+      'gemini-2.5-flash',
+      'gemini-flash-latest',
+      'gemini-2.0-flash',
+      'gemini-2.5-flash-lite',
+      'gemini-2.0-flash-lite',
+    ];
     try {
       final res = await http
           .get(Uri.parse('https://generativelanguage.googleapis.com/v1beta/models?pageSize=200'),
@@ -721,19 +888,16 @@ TOOLS: call{to} sms{to,text} whatsapp{to,text} open_app{name,package?} alarm{hou
             .where((m) => (m['supportedGenerationMethods'] as List?)?.contains('generateContent') ?? false)
             .map((m) => m['name'].toString().replaceFirst('models/', ''))
             .toList();
-        if (models.contains('gemini-flash-latest')) return _gModel = 'gemini-flash-latest';
-        const bad = ['image', 'tts', 'embed', 'live', 'audio', 'exp', 'thinking', 'lite', 'preview', 'robotics', 'computer', '8b'];
-        final flash = models.where((n) => n.startsWith('gemini') && n.contains('flash') && !bad.any(n.contains)).toList()
-          ..sort((a, b) => b.compareTo(a));
-        if (flash.isNotEmpty) return _gModel = flash.first;
+        final ok = pref.where(models.contains).toList();
+        if (ok.isNotEmpty) return _gList = ok;
       }
     } catch (_) {}
-    return _gModel = 'gemini-flash-latest';
+    return _gList = pref;
   }
 
   Future<String> _gemini(List<Map<String, String>> msgs, {String? sys, bool json = true}) async {
-    for (int attempt = 0; attempt < 2; attempt++) {
-      final model = await _gemModel(fresh: attempt == 1);
+    AiException? lastErr;
+    for (final model in await _gemCandidates()) {
       final res = await http
           .post(
             Uri.parse('https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent'),
@@ -746,20 +910,33 @@ TOOLS: call{to} sms{to,text} whatsapp{to,text} open_app{name,package?} alarm{hou
                         'parts': [{'text': m['content']}]
                       })
                   .toList(),
-              'generationConfig': {'temperature': 0.4, if (json) 'responseMimeType': 'application/json'},
+              'generationConfig': {
+                'temperature': 0.7,
+                'maxOutputTokens': 700,
+                if (json) 'responseMimeType': 'application/json',
+                if (model.contains('2.5')) 'thinkingConfig': {'thinkingBudget': 0},
+              },
             }),
           )
           .timeout(const Duration(seconds: 40));
       if (res.statusCode == 200) {
         final parts = jsonDecode(res.body)['candidates']?[0]?['content']?['parts'] as List?;
         final t = parts?.map((p) => p['text'] ?? '').join().toString().trim() ?? '';
-        if (t.isEmpty) throw AiException('Gemini ne khaali jawab diya, dobara poochiye.');
+        if (t.isEmpty) {
+          lastErr = AiException('Gemini ($model): khaali jawab aaya.');
+          continue;
+        }
         return t;
       }
-      if (attempt == 0 && (res.statusCode == 404 || res.body.contains('not found'))) continue;
-      throw AiException(_friendly('Gemini', res.statusCode, res.body));
+      final err = AiException(_friendly('Gemini ($model)', res.statusCode, res.body));
+      if ([404, 429, 500, 503].contains(res.statusCode) || res.body.contains('not found')) {
+        lastErr = err; // agla model try karo
+        continue;
+      }
+      throw err;
     }
-    throw AiException('Gemini: koi chalne wala model nahi mila.');
+    _gList = null;
+    throw lastErr ?? AiException('Gemini: koi chalne wala model nahi mila.');
   }
 
   Future<void> _test() async {
@@ -783,7 +960,7 @@ TOOLS: call{to} sms{to,text} whatsapp{to,text} open_app{name,package?} alarm{hou
     }
     if (_qKey.isNotEmpty) {
       try {
-        await _groq(ping, sys: 'Reply OK');
+        await _groq(ping, sys: 'Reply OK', json: false);
         out.add('Groq theek chal raha hai');
       } on AiException catch (e) {
         out.add(e.message);
@@ -816,13 +993,14 @@ TOOLS: call{to} sms{to,text} whatsapp{to,text} open_app{name,package?} alarm{hou
   }
 
   Future<void> _setKey(bool gem) async {
-    final v = await _prompt(gem ? 'Gemini API Key' : 'Groq API Key', gem ? 'AQ.xxxxxxxx...' : 'gsk_...');
+    final v = await _prompt(gem ? 'Gemini API Key' : 'Groq API Key', gem ? 'AIza... ya AQ...' : 'gsk_...');
     if (v == null || v.isEmpty) return;
     await _put(gem ? 'gkey' : 'qkey', v);
     setState(() {
       if (gem) {
         _gKey = v;
-        _gModel = null;
+        _gList = null;
+        _ttsBlockedUntil = DateTime.fromMillisecondsSinceEpoch(0);
       } else {
         _qKey = v;
         _qModel = null;
@@ -967,7 +1145,7 @@ TOOLS: call{to} sms{to,text} whatsapp{to,text} open_app{name,package?} alarm{hou
         ),
         Center(
             child: Text(_busy ? 'Soch raha hoon...' : (_status.isEmpty ? 'Tap the orb to speak' : _status),
-                textAlign: TextAlign.center, maxLines: 6, overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center, maxLines: 8, overflow: TextOverflow.ellipsis,
                 style: const TextStyle(color: Colors.white70, height: 1.4))),
         if (_action.isNotEmpty)
           Center(child: Text(_action, style: TextStyle(color: _accent, fontSize: 11))),
@@ -1124,14 +1302,27 @@ TOOLS: call{to} sms{to,text} whatsapp{to,text} open_app{name,package?} alarm{hou
           await _put('provider', n);
           setState(() => _provider = n);
         }),
+        _tile(Icons.volume_up, 'Natural Voice (Gemini)', _natural ? 'ON - human jaisi awaaz' : 'OFF - phone ki default awaaz',
+            () async {
+          final n = !_natural;
+          await _putBool('natural', n);
+          setState(() => _natural = n);
+          _ttsBlockedUntil = DateTime.fromMillisecondsSinceEpoch(0);
+        }),
+        _tile(Icons.multitrack_audio, 'Voice Style', 'Current: $_voice (tap: badlo aur suno)', () async {
+          final n = _voices[(_voices.indexOf(_voice) + 1) % _voices.length];
+          await _put('voice', n);
+          setState(() => _voice = n);
+          _say('Namaste $_user, ab meri awaaz aisi hogi. Kaisi lagi?');
+        }),
         _tile(Icons.network_check, 'Test Connection', 'Keys aur model check karo', _test),
         _section('WAKE WORD'),
         _glass(
             child: Row(children: [
           Expanded(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            const Text('Wake Word', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
-            Text("Say 'Hey $_wake'", style: const TextStyle(color: Colors.white54, fontSize: 12)),
+            const Text('Voice Mode (hands-free)', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+            Text("Bolo, ya 'Hey $_wake' bhi chalega", style: const TextStyle(color: Colors.white54, fontSize: 12)),
           ])),
           Switch(value: _standby, activeColor: _accent, onChanged: (_) => _toggleStandby()),
         ])),
