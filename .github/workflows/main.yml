@@ -30,9 +30,36 @@ jobs:
           rm -rf android
           flutter create --platforms=android --project-name max_app .
 
-      - name: Add required packages
+      - name: Write pubspec.yaml (fixed versions)
         run: |
-          flutter pub add speech_to_text flutter_tts flutter_contacts torch_light android_intent_plus http shared_preferences image_picker path_provider permission_handler url_launcher
+          rm -f pubspec.lock
+          cat > pubspec.yaml <<'EOF'
+          name: max_app
+          description: MAX voice assistant
+          publish_to: 'none'
+          version: 1.0.0+1
+
+          environment:
+            sdk: '>=3.4.0 <4.0.0'
+
+          dependencies:
+            flutter:
+              sdk: flutter
+            speech_to_text: ^7.0.0
+            flutter_tts: ^4.2.0
+            flutter_contacts: ^1.1.9
+            torch_light: ^1.1.0
+            android_intent_plus: ^5.3.0
+            http: ^1.2.2
+            shared_preferences: ^2.3.2
+            image_picker: ^1.1.2
+            path_provider: ^2.1.4
+            permission_handler: ^11.3.1
+            url_launcher: ^6.3.0
+
+          flutter:
+            uses-material-design: true
+          EOF
 
       - name: Add permissions
         run: |
@@ -69,6 +96,9 @@ jobs:
 
       - name: Get packages
         run: flutter pub get
+
+      - name: Check Dart errors
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings 2>&1 | grep -E "error" || true
 
       - name: Build release APK
         run: flutter build apk --release
