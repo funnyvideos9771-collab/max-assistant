@@ -8,6 +8,7 @@ import 'dart:ui' show ImageFilter;
 import 'package:android_intent_plus/android_intent.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:http/http.dart' as http;
@@ -25,7 +26,8 @@ const _themes = <String, Color>{
   'Cyan Pulse': Color(0xFF19E6D4),
   'Neon Matrix': Color(0xFF2BFF4F),
 };
-const _voices = <String>['Kore', 'Aoede', 'Puck', 'Charon', 'Fenrir'];
+// Sab female voices
+const _voices = <String>['Aoede', 'Leda', 'Zephyr', 'Kore', 'Autonoe'];
 const _apps = <String, String>{
   'whatsapp': 'com.whatsapp', 'instagram': 'com.instagram.android', 'youtube': 'com.google.android.youtube',
   'chrome': 'com.android.chrome', 'gmail': 'com.google.android.gm', 'maps': 'com.google.android.apps.maps',
@@ -113,6 +115,8 @@ class Shell extends StatefulWidget {
 }
 
 class _ShellState extends State<Shell> with SingleTickerProviderStateMixin {
+  static const _native = MethodChannel('max/native');
+
   final stt.SpeechToText _speech = stt.SpeechToText();
   final FlutterTts _tts = FlutterTts();
   final AudioPlayer _player = AudioPlayer();
@@ -126,7 +130,7 @@ class _ShellState extends State<Shell> with SingleTickerProviderStateMixin {
   DateTime _ttsBlockedUntil = DateTime.fromMillisecondsSinceEpoch(0);
   String _status = '', _action = '';
   String _user = 'Boss', _wake = 'power', _provider = 'auto', _gKey = '', _qKey = '';
-  String _themeName = 'Crimson Core', _wall = '', _voice = 'Kore';
+  String _themeName = 'Crimson Core', _wall = '', _voice = 'Aoede';
   String? _qModel;
   List<String>? _gList;
   List<Contact>? _contactsCache;
@@ -145,7 +149,7 @@ class _ShellState extends State<Shell> with SingleTickerProviderStateMixin {
       });
     });
     _initTts();
-    [Permission.microphone, Permission.camera, Permission.phone, Permission.contacts].request();
+    [Permission.microphone, Permission.camera, Permission.phone, Permission.contacts, Permission.sms].request();
   }
 
   Future<void> _initTts() async {
@@ -189,7 +193,8 @@ class _ShellState extends State<Shell> with SingleTickerProviderStateMixin {
       _themeName = p.getString('theme') ?? 'Crimson Core';
       _wall = p.getString('wall') ?? '';
       _natural = p.getBool('natural') ?? true;
-      _voice = p.getString('voice') ?? 'Kore';
+      final v = p.getString('voice') ?? 'Aoede';
+      _voice = _voices.contains(v) ? v : 'Aoede';
       _memory = p.getStringList('memory') ?? [];
       _notes = p.getStringList('notes') ?? [];
       _chat = (p.getStringList('chat') ?? [])
@@ -314,7 +319,7 @@ class _ShellState extends State<Shell> with SingleTickerProviderStateMixin {
     _idle = 0;
     setState(() => _standby = !_standby);
     if (_standby) {
-      _say('Voice mode on hai, $_user. Bolo, main sun raha hoon.');
+      _say('Voice mode on hai, $_user. Bolo, main sun rahi hoon.');
     } else {
       _gen++;
       _cmdMode = false;
@@ -371,9 +376,7 @@ class _ShellState extends State<Shell> with SingleTickerProviderStateMixin {
     return Uint8List.fromList([...h.buffer.asUint8List(), ...pcm]);
   }
 
-  /// Gemini ki natural awaaz. false = fail hua, phone TTS use hoga.
-  Future<bool> _geminiSpeak(String text, int g) async {
-    if (_gKey.isEmpty || !_natural || DateTime.now().isBefore(_ttsBlockedUntil) || text.trim().isEmpty) return false;
+  Future<Uint8List?> _ttsFetch(String text) async {
     try {
       final res = await http
           .post(
@@ -384,7 +387,7 @@ class _ShellState extends State<Shell> with SingleTickerProviderStateMixin {
               'contents': [
                 {
                   'parts': [
-                    {'text': 'Say this in a warm, natural, relaxed conversational tone like a real friend talking: $text'}
+                    {'text': 'Say clearly in a warm, natural, friendly female voice: $text'}
                   ]
                 }
               ],
@@ -401,28 +404,60 @@ class _ShellState extends State<Shell> with SingleTickerProviderStateMixin {
           .timeout(const Duration(seconds: 25));
       if (res.statusCode == 429) {
         _ttsBlockedUntil = DateTime.now().add(const Duration(minutes: 2));
-        return false;
+        return null;
       }
-      if (res.statusCode != 200) return false;
+      if (res.statusCode != 200) return null;
       final parts = jsonDecode(res.body)['candidates']?[0]?['content']?['parts'] as List?;
       final part = parts?.firstWhere((p) => p is Map && p['inlineData'] != null, orElse: () => null);
       final b64 = part?['inlineData']?['data'];
-      if (b64 == null) return false;
-      if (g != _gen) return true; // beech me user ne rok diya
-      final dir = await getTemporaryDirectory();
-      final f = File('${dir.path}/max_tts_$g.wav');
-      await f.writeAsBytes(_wav(base64Decode(b64.toString())), flush: true);
-      final done = Completer<void>();
-      final sub = _player.onPlayerStateChanged.listen((st) {
-        if ((st == PlayerState.completed || st == PlayerState.stopped) && !done.isCompleted) done.complete();
-      });
-      await _player.play(DeviceFileSource(f.path));
-      await done.future.timeout(const Duration(seconds: 90), onTimeout: () {});
-      await sub.cancel();
-      return true;
+      return b64 == null ? null : _wav(base64Decode(b64.toString()));
     } catch (_) {
-      return false;
+      return null;
     }
+  }
+
+  Future<void> _playWav(Uint8List wav, int g) async {
+    final dir = await getTemporaryDirectory();
+    final f = File('${dir.path}/max_tts_${g}_${DateTime.now().microsecondsSinceEpoch}.wav');
+    await f.writeAsBytes(wav, flush: true);
+    final done = Completer<void>();
+    final sub = _player.onPlayerStateChanged.listen((st) {
+      if ((st == PlayerState.completed || st == PlayerState.stopped) && !done.isCompleted) done.complete();
+    });
+    await _player.play(DeviceFileSource(f.path));
+    await done.future.timeout(const Duration(seconds: 90), onTimeout: () {});
+    await sub.cancel();
+  }
+
+  /// Gemini ki natural awaaz, chunk-by-chunk. false = fail hua, phone TTS use hoga.
+  Future<bool> _geminiSpeak(String text, int g) async {
+    if (_gKey.isEmpty || !_natural || DateTime.now().isBefore(_ttsBlockedUntil) || text.trim().isEmpty) return false;
+    final chunks = <String>[];
+    var cur = '';
+    for (final m in RegExp(r'[^।.!?]+[।.!?]?').allMatches(text)) {
+      cur += '${m.group(0)!.trim()} ';
+      if (cur.length >= 40) {
+        chunks.add(cur.trim());
+        cur = '';
+      }
+    }
+    if (cur.trim().isNotEmpty) chunks.add(cur.trim());
+    if (chunks.isEmpty) return false;
+
+    Future<Uint8List?> next = _ttsFetch(chunks[0]);
+    for (var i = 0; i < chunks.length; i++) {
+      final wav = await next;
+      if (g != _gen) return true;
+      if (wav == null) {
+        if (i == 0) return false; // phone TTS fallback
+        await _tts.speak(chunks.skip(i).join(' '));
+        return true;
+      }
+      if (i + 1 < chunks.length) next = _ttsFetch(chunks[i + 1]);
+      await _playWav(wav, g);
+      if (g != _gen) return true;
+    }
+    return true;
   }
 
   Future<void> _say(String text, {String? show, bool next = false}) async {
@@ -440,7 +475,7 @@ class _ShellState extends State<Shell> with SingleTickerProviderStateMixin {
     _speaking = false;
     if (!mounted) return;
     // echo khatam hone do, tabhi mic on karo
-    await Future.delayed(const Duration(milliseconds: 700));
+    await Future.delayed(const Duration(milliseconds: 400));
     if (g != _gen || !mounted) return;
     if (next) {
       _listen(command: true);
@@ -450,21 +485,22 @@ class _ShellState extends State<Shell> with SingleTickerProviderStateMixin {
   }
 
   // -------------------------------------------------------------- agent
-  String get _sys => """You are MAX, ${_user}'s close, witty, caring friend who also lives inside their Android phone and can control it. Now: ${DateTime.now().toIso8601String()} (IST).
+  String get _sys => """You are MAX, ${_user}'s close, witty, caring friend who also lives inside their Android phone and can control it. You are a girl, so speak in feminine Hindi (e.g. "main sun rahi hoon", "kar rahi hoon"). Now: ${DateTime.now().toIso8601String()} (IST).
 
 PERSONALITY AND STYLE:
-- Talk like a real human friend in natural Hinglish (Roman script), never like a robot or customer-care bot. Never say "As an AI". No lists, no markdown, no emojis.
+- Talk like a real human friend in natural Hindi written in DEVANAGARI script (English words like app names may stay in English letters). Never like a robot or customer-care bot. Never say "As an AI". No lists, no markdown, no emojis.
 - First understand exactly what ${_user} asked, then answer THAT directly with a real, useful answer. If it is casual talk, reply like a friend with some feeling and personality.
-- Usually 2 to 4 short natural sentences, because 'say' is spoken aloud. Use natural fillers sometimes (acha, dekho, hmm, arre, waise). Match the user's mood. Occasionally end with a short follow-up question.
+- Usually 2 to 4 short natural sentences, because 'say' is spoken aloud. Use natural fillers sometimes (अच्छा, देखो, हम्म, अरे, वैसे). Match the user's mood. Occasionally end with a short follow-up question.
 - If the request is unclear, ask ONE short clarifying question.
 - Use the earlier conversation for context; never repeat yourself.
+- The user's speech is transcribed by a noisy recognizer and may contain wrong words; guess the intended meaning from sound and context instead of taking words literally.
 - For facts that change (news, scores, prices, weather) use a tool, do not guess.
-- The user's speech may come in Devanagari or Roman; always write tool args in English/Roman letters (e.g. app name "whatsapp").${_teacher ? '\n- MODE English Teacher: reply in simple English, gently correct the user\'s mistakes, and ask one follow-up question.' : ''}
+- The user's speech may come in Devanagari or Roman; always write tool args in English/Roman letters (e.g. app name "whatsapp", contact names in Roman letters).${_teacher ? '\n- MODE English Teacher: reply in simple English, gently correct the user\'s mistakes, and ask one follow-up question.' : ''}
 
 Long-term memory: ${_memory.isEmpty ? 'none' : _memory.join('; ')}
 
 OUTPUT FORMAT: reply with ONLY one plain-text JSON object (do NOT use any function-calling API): {"action":"<tool or none>","args":{},"say":"<speech>"}. Use "none" to chat or to ask for a missing detail. INFO tools return a TOOL_RESULT, then answer with action "none". Never invent phone numbers.
-TOOLS: call{to} sms{to,text} whatsapp{to,text} open_app{name,package?} alarm{hour,minute,label} flashlight{state:on|off} youtube{query} maps{query} shop{platform:flipkart|amazon|meesho,query} open_url{url} remember{fact} save_note{text} read_notes{}INFO weather{city}INFO web_search{query}INFO now{}INFO lookup_number{number}INFO""";
+TOOLS: call{to} sms{to,text} whatsapp{to,text} open_app{name,package?} alarm{hour,minute,label} flashlight{state:on|off} youtube{query} maps{query} shop{platform:flipkart|amazon|meesho,query} open_url{url} remember{fact} save_note{text} lock_phone{} read_notes{}INFO weather{city}INFO web_search{query}INFO now{}INFO lookup_number{number}INFO""";
 
   Map<String, dynamic>? _json(String raw) {
     final s = raw.indexOf('{'), e = raw.lastIndexOf('}');
@@ -495,7 +531,7 @@ TOOLS: call{to} sms{to,text} whatsapp{to,text} open_app{name,package?} alarm{hou
       _action = '';
     });
     final msgs = <Map<String, String>>[
-      for (final m in _chat.reversed.take(12).toList().reversed) {'role': m['role'] ?? 'user', 'content': m['text'] ?? ''},
+      for (final m in _chat.reversed.take(8).toList().reversed) {'role': m['role'] ?? 'user', 'content': m['text'] ?? ''},
       {'role': 'user', 'content': text},
     ];
     while (msgs.length > 1 && msgs.first['role'] != 'user') {
@@ -558,19 +594,72 @@ TOOLS: call{to} sms{to,text} whatsapp{to,text} open_app{name,package?} alarm{hou
     return _contactsCache = await FlutterContacts.getContacts(withProperties: true);
   }
 
-  Future<String?> _phone(String q) async {
-    final d = q.replaceAll(RegExp(r'[^0-9+]'), '');
-    if (_digits(d).length >= 6) return d;
-    final n = q.toLowerCase().trim();
-    if (n.isEmpty) return null;
-    final list = (await _contacts()).where((c) => c.phones.isNotEmpty).toList();
-    for (final c in list) {
-      if (c.displayName.toLowerCase() == n) return c.phones.first.number;
+  String _nm(String s) => s.toLowerCase().replaceAll(RegExp(r'[^a-z0-9\u0900-\u097F]'), '');
+
+  int _lev(String a, String b) {
+    final d = List.generate(a.length + 1, (_) => List<int>.filled(b.length + 1, 0));
+    for (var i = 0; i <= a.length; i++) {
+      d[i][0] = i;
     }
-    for (final c in list) {
-      if (c.displayName.toLowerCase().contains(n)) return c.phones.first.number;
+    for (var j = 0; j <= b.length; j++) {
+      d[0][j] = j;
+    }
+    for (var i = 1; i <= a.length; i++) {
+      for (var j = 1; j <= b.length; j++) {
+        d[i][j] = math.min(math.min(d[i - 1][j] + 1, d[i][j - 1] + 1),
+            d[i - 1][j - 1] + (a[i - 1] == b[j - 1] ? 0 : 1));
+      }
+    }
+    return d[a.length][b.length];
+  }
+
+  Future<String?> _phone(String q) async {
+    final dg = q.replaceAll(RegExp(r'[^0-9+]'), '');
+    if (_digits(dg).length >= 6) return dg;
+    final n = _nm(q);
+    if (n.isEmpty) return null;
+    for (final fresh in [false, true]) {
+      final list = (await _contacts(fresh: fresh)).where((c) => c.phones.isNotEmpty);
+      String? best;
+      double bs = 1e9;
+      for (final c in list) {
+        final full = _nm(c.displayName);
+        if (full.isEmpty) continue;
+        double score = 1e9;
+        if (full == n) {
+          score = 0;
+        } else if (full.contains(n) || n.contains(full)) {
+          score = 1;
+        } else {
+          final toks = c.displayName.split(RegExp(r'\s+')).map(_nm).where((t) => t.isNotEmpty);
+          for (final t in [full, ...toks]) {
+            final r = _lev(t, n) / math.max(t.length, n.length);
+            if (r <= 0.34) score = math.min(score, 2 + r);
+          }
+        }
+        if (score < bs) {
+          bs = score;
+          best = c.phones.first.number;
+        }
+      }
+      if (best != null) return best;
     }
     return null;
+  }
+
+  Future<String?> _ytFirstId(String q) async {
+    try {
+      final r = await http.get(
+        Uri.parse('https://www.youtube.com/results?search_query=${Uri.encodeComponent(q)}&sp=EgIQAQ%3D%3D'),
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36',
+          'Accept-Language': 'en-US,en;q=0.9',
+        },
+      ).timeout(const Duration(seconds: 15));
+      return RegExp(r'"videoId":"([\w-]{11})"').firstMatch(r.body)?.group(1);
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<String> _tool(String tool, Map<String, dynamic> a) async {
@@ -581,7 +670,7 @@ TOOLS: call{to} sms{to,text} whatsapp{to,text} open_app{name,package?} alarm{hou
             final n = await _phone(_s(a['to']));
             if (n == null) return "Failed: '${_s(a['to'])}' contacts mein nahi mila, $_user.";
             await _open('tel:$n', false);
-            return 'Call laga raha hoon.';
+            return 'Call laga rahi hoon.';
           }
         case 'sms':
           {
@@ -595,15 +684,18 @@ TOOLS: call{to} sms{to,text} whatsapp{to,text} open_app{name,package?} alarm{hou
             final to = _s(a['to']), text = _s(a['text']);
             final n = to.isEmpty ? null : await _phone(to);
             if (to.isNotEmpty && n == null) return "Failed: '$to' ka number nahi mila.";
-            var url = 'https://wa.me/';
+            var url = 'whatsapp://send?';
             if (n != null) {
               var d = _digits(n);
               if (d.length == 10) d = '91$d';
-              url += d;
+              url += 'phone=$d&';
             }
-            if (text.isNotEmpty) url += '?text=${Uri.encodeComponent(text)}';
-            await _open(url);
-            return 'WhatsApp khol diya.';
+            url += 'text=${Uri.encodeComponent(text)}';
+            if (!await _open(url)) {
+              final d = n == null ? '' : _digits(n);
+              await _open('https://wa.me/$d?text=${Uri.encodeComponent(text)}');
+            }
+            return 'WhatsApp khol diya, send dabaiye.';
           }
         case 'open_app':
           {
@@ -667,10 +759,25 @@ TOOLS: call{to} sms{to,text} whatsapp{to,text} open_app{name,package?} alarm{hou
         case 'youtube':
           {
             final q = _s(a['query']);
-            await _open(q.isEmpty
-                ? 'https://www.youtube.com'
-                : 'https://www.youtube.com/results?search_query=${Uri.encodeComponent(q)}');
-            return 'YouTube khol diya.';
+            if (q.isEmpty) {
+              await _open('https://www.youtube.com');
+              return 'YouTube khol diya.';
+            }
+            final id = await _ytFirstId(q);
+            if (id == null) {
+              await _open('https://www.youtube.com/results?search_query=${Uri.encodeComponent(q)}');
+              return 'Search khol diya, video nahi mila.';
+            }
+            try {
+              await AndroidIntent(
+                action: 'android.intent.action.VIEW',
+                data: 'https://www.youtube.com/watch?v=$id',
+                package: 'com.google.android.youtube',
+              ).launch();
+            } catch (_) {
+              await _open('https://www.youtube.com/watch?v=$id');
+            }
+            return 'Gaana chala rahi hoon.';
           }
         case 'maps':
           await _open('https://www.google.com/maps/search/?api=1&query=${Uri.encodeComponent(_s(a['query']))}');
@@ -692,6 +799,15 @@ TOOLS: call{to} sms{to,text} whatsapp{to,text} open_app{name,package?} alarm{hou
             if (!u.startsWith('http')) u = 'https://$u';
             await _open(u);
             return 'Link khol diya.';
+          }
+        case 'lock_phone':
+          {
+            if (await _native.invokeMethod<bool>('isAdmin') != true) {
+              await _native.invokeMethod('requestAdmin');
+              return 'Failed: Device Admin permission on kariye, phir dobara bolo.';
+            }
+            Future.delayed(const Duration(seconds: 3), () => _native.invokeMethod('lock'));
+            return 'Phone lock kar rahi hoon.';
           }
         case 'remember':
           _memory.add(_s(a['fact']));
@@ -788,9 +904,9 @@ TOOLS: call{to} sms{to,text} whatsapp{to,text} open_app{name,package?} alarm{hou
   // ---------------------------------------------------------- LLM layer
   Future<String> _llm(List<Map<String, String>> msgs) async {
     final order = <String>[
-      if (_provider == 'groq' && _qKey.isNotEmpty) 'groq',
+      if (_provider != 'gemini' && _qKey.isNotEmpty) 'groq',
       if (_gKey.isNotEmpty) 'gemini',
-      if (_qKey.isNotEmpty && _provider != 'groq') 'groq',
+      if (_qKey.isNotEmpty && _provider == 'gemini') 'groq',
     ];
     final errs = <String>[];
     for (final p in order.toSet()) {
@@ -844,7 +960,7 @@ TOOLS: call{to} sms{to,text} whatsapp{to,text} open_app{name,package?} alarm{hou
             body: jsonEncode({
               'model': model,
               'temperature': 0.7,
-              'max_tokens': 700,
+              'max_tokens': 350,
               if (json) 'response_format': {'type': 'json_object'},
               'messages': [
                 {'role': 'system', 'content': '${sys ?? _sys}$extra'},
@@ -912,7 +1028,7 @@ TOOLS: call{to} sms{to,text} whatsapp{to,text} open_app{name,package?} alarm{hou
                   .toList(),
               'generationConfig': {
                 'temperature': 0.7,
-                'maxOutputTokens': 700,
+                'maxOutputTokens': 350,
                 if (json) 'responseMimeType': 'application/json',
                 if (model.contains('2.5')) 'thinkingConfig': {'thinkingBudget': 0},
               },
@@ -1042,6 +1158,23 @@ TOOLS: call{to} sms{to,text} whatsapp{to,text} open_app{name,package?} alarm{hou
     setState(() => _wall = f.path);
   }
 
+  Future<void> _setupAlerts() async {
+    final ph = await _prompt('Alert number', '8700176034', initial: '8700176034');
+    if (ph == null || ph.isEmpty) return;
+    await _put('alert_phone', ph);
+    final cmb = await _prompt('CallMeBot WhatsApp apikey', 'callmebot.com se milega');
+    if (cmb != null) await _put('cmb_key', cmb);
+    final tg = await _prompt('Telegram bot token', '123456:ABC...');
+    if (tg != null) await _put('tg_token', tg);
+    final cid = await _prompt('Telegram chat id', 'number');
+    if (cid != null) await _put('tg_chat', cid);
+    await Permission.sms.request();
+    try {
+      if (await _native.invokeMethod<bool>('isAdmin') != true) await _native.invokeMethod('requestAdmin');
+    } catch (_) {}
+    _say('Intruder alert set ho gaya, $_user.');
+  }
+
   void _sendTyped() {
     final t = _input.text.trim();
     _input.clear();
@@ -1144,7 +1277,7 @@ TOOLS: call{to} sms{to,text} whatsapp{to,text} open_app{name,package?} alarm{hou
           ),
         ),
         Center(
-            child: Text(_busy ? 'Soch raha hoon...' : (_status.isEmpty ? 'Tap the orb to speak' : _status),
+            child: Text(_busy ? 'Soch rahi hoon...' : (_status.isEmpty ? 'Tap the orb to speak' : _status),
                 textAlign: TextAlign.center, maxLines: 8, overflow: TextOverflow.ellipsis,
                 style: const TextStyle(color: Colors.white70, height: 1.4))),
         if (_action.isNotEmpty)
@@ -1262,6 +1395,7 @@ TOOLS: call{to} sms{to,text} whatsapp{to,text} open_app{name,package?} alarm{hou
       [Icons.camera_alt, 'Camera', 'camera kholo'],
       [Icons.alarm, 'Alarm', 'subah 6 baje ka alarm lagao'],
       [Icons.shopping_bag, 'Shopping', 'flipkart kholo'],
+      [Icons.lock, 'Lock Phone', 'phone lock karo'],
     ];
     final w = (MediaQuery.of(context).size.width - 50) / 2;
     return ListView(padding: const EdgeInsets.all(20), children: [
@@ -1341,6 +1475,7 @@ TOOLS: call{to} sms{to,text} whatsapp{to,text} open_app{name,package?} alarm{hou
           setState(() => _wall = '');
         }),
         _section('SECURITY & PRIVACY'),
+        _tile(Icons.shield_moon, 'Intruder Alert', 'Galat PIN par WhatsApp/Telegram/SMS alert', _setupAlerts),
         _tile(Icons.shield, 'Permissions', 'Manage all required permissions', () => openAppSettings()),
         _tile(Icons.delete_sweep, 'Clear Chat & Memory', 'Saari purani baatein hatao', () async {
           setState(() {
