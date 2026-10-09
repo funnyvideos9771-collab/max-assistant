@@ -1,1459 +1,1262 @@
-import 'dart:async';
-import 'dart:convert';
-import 'dart:io';
 import 'dart:math' as math;
-import 'dart:typed_data';
-import 'dart:ui' show ImageFilter;
 
-import 'package:android_intent_plus/android_intent.dart';
-import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_contacts/flutter_contacts.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_tts/flutter_tts.dart';
-import 'package:http/http.dart' as http;
-import 'package:image_picker/image_picker.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:permission_handler/permission_handler.dart';
+import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:speech_to_text/speech_recognition_error.dart';
 import 'package:speech_to_text/speech_recognition_result.dart';
-import 'package:speech_to_text/speech_to_text.dart' as stt;
-import 'package:torch_light/torch_light.dart';
-import 'package:url_launcher/url_launcher.dart';
+import 'package:speech_to_text/speech_to_text.dart';
 
-const _themes = <String, Color>{
-  'Crimson Core': Color(0xFFE5173F),
-  'Cyan Pulse': Color(0xFF19E6D4),
-  'Neon Matrix': Color(0xFF2BFF4F),
-};
-const _apps = <String, String>{
-  'whatsapp': 'com.whatsapp', 'instagram': 'com.instagram.android', 'youtube': 'com.google.android.youtube',
-  'chrome': 'com.android.chrome', 'gmail': 'com.google.android.gm', 'maps': 'com.google.android.apps.maps',
-  'facebook': 'com.facebook.katana', 'telegram': 'org.telegram.messenger', 'snapchat': 'com.snapchat.android',
-  'phonepe': 'com.phonepe.app', 'paytm': 'net.one97.paytm', 'gpay': 'com.google.android.apps.nbu.paisa.user',
-  'flipkart': 'com.flipkart.android', 'amazon': 'in.amazon.mShop.android.shopping', 'meesho': 'com.meesho.supply',
-  'truecaller': 'com.truecaller', 'spotify': 'com.spotify.music', 'netflix': 'com.netflix.mediaclient',
-  'hotstar': 'in.startv.hotstar', 'calculator': 'com.google.android.calculator',
-  'photos': 'com.google.android.apps.photos', 'clock': 'com.google.android.deskclock',
-  'contacts': 'com.google.android.contacts', 'messages': 'com.google.android.apps.messaging',
-  'phone': 'com.google.android.dialer', 'play store': 'com.android.vending',
-};
-const _info = <String>{'weather', 'web_search', 'now', 'read_notes', 'lookup_number'};
-const _quotes = <String>[
-  'The best way to predict the future is to create it.',
-  'Small steps every day beat big plans never started.',
-  'Focus on progress, not perfection.',
-  'Discipline is choosing what you want most over what you want now.',
-];
+import 'gemini_service.dart';
+import 'page_viewer.dart';
 
-// Gemini TTS voices (Maya app jaisi natural awaaz)
-const _voices = <String, String>{
-  'Breezy': 'Aoede', 'Warm': 'Sulafat', 'Gentle': 'Vindemiatrix', 'Youthful': 'Leda',
-  'Bright': 'Zephyr', 'Upbeat': 'Puck', 'Smooth': 'Algieba', 'Clear': 'Iapetus',
-  'Easy-going': 'Callirrhoe', 'Friendly': 'Achird', 'Mature': 'Gacrux', 'Firm': 'Kore',
-  'Informative': 'Charon',
-};
-const _personas = <String, String>{
-  'Friendly': 'Persona: warm, caring, friendly best-friend vibe. Casual Hinglish, light emojis-free speech.',
-  'Friday': 'Persona: calm, professional, precise like a butler AI. Short and respectful.',
-  'Venom': 'Persona: bold, confident, a little savage and witty, but always helpful and never rude.',
-};
+// ─────────────────────────────────────────────────────────────
+// Theme tokens
+// ─────────────────────────────────────────────────────────────
+const Color kBlack = Color(0xFF000000);
+const Color kPanel = Color(0xFF110A02);
+const Color kOrange = Color(0xFFFF6D00);
+const Color kAmber = Color(0xFFFFA000);
+const Color kGold = Color(0xFFFFD54F);
+const Color kError = Color(0xFFFF5252);
 
-class AiException implements Exception {
-  final String message;
-  AiException(this.message);
+// ─────────────────────────────────────────────────────────────
+// Assistant controller (state + speech + API)
+// ─────────────────────────────────────────────────────────────
+enum Phase { idle, listening, thinking, speaking }
+
+class ChatMessage {
+  ChatMessage(this.fromUser, this.text);
+  final bool fromUser;
+  final String text;
 }
 
-void main() {
-  WidgetsFlutterBinding.ensureInitialized();
-  runApp(const MaxApp());
-}
+final GlobalKey<NavigatorState> navKey = GlobalKey<NavigatorState>();
 
-class MaxApp extends StatelessWidget {
-  const MaxApp({super.key});
-  @override
-  Widget build(BuildContext context) => MaterialApp(
-        debugShowCheckedModeBanner: false,
-        title: 'MAX',
-        theme: ThemeData.dark().copyWith(scaffoldBackgroundColor: Colors.black),
-        home: const Shell(),
-      );
-}
-
-class OrbPainter extends CustomPainter {
-  final double t;
-  final Color color;
-  final bool active;
-  OrbPainter(this.t, this.color, this.active);
-
-  @override
-  void paint(Canvas canvas, Size s) {
-    final c = s.center(Offset.zero);
-    final r = s.width / 2;
-    canvas.drawCircle(
-        c,
-        r,
-        Paint()
-          ..shader = RadialGradient(colors: [color.withOpacity(active ? 0.55 : 0.3), Colors.transparent])
-              .createShader(Rect.fromCircle(center: c, radius: r)));
-    for (int i = 0; i < 3; i++) {
-      canvas.save();
-      canvas.translate(c.dx, c.dy);
-      canvas.rotate(t * 2 * math.pi * (i.isEven ? 1 : -1) * (1 + i * 0.4) + i);
-      final p = Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 2.4 - i * 0.6
-        ..color = (i == 1 ? Colors.white : color).withOpacity(0.85 - i * 0.2);
-      canvas.drawOval(Rect.fromCenter(center: Offset.zero, width: r * 1.5, height: r * (1.0 + i * 0.22)), p);
-      canvas.restore();
-    }
-    final core = Rect.fromCircle(center: c, radius: r * 0.27);
-    canvas.drawCircle(
-        c,
-        r * 0.27,
-        Paint()..shader = RadialGradient(colors: [color.withOpacity(0.95), color.withOpacity(0.5)]).createShader(core));
+class AssistantController extends ChangeNotifier {
+  AssistantController() {
+    _init();
   }
 
-  @override
-  bool shouldRepaint(OrbPainter o) => true;
-}
+  static const String _prefKey = 'gemini_api_key';
+  static const String _prefStandby = 'standby_enabled';
+  static const String _envKey = String.fromEnvironment('GEMINI_API_KEY');
+  static final RegExp _wakePattern = RegExp(r'(hello|hallo|हेलो|हैलो)\s*(p(ow|aw|av|ou)|पावर|पवार)');
 
-class Shell extends StatefulWidget {
-  const Shell({super.key});
-  @override
-  State<Shell> createState() => _ShellState();
-}
-
-class _ShellState extends State<Shell> with SingleTickerProviderStateMixin {
-  final stt.SpeechToText _speech = stt.SpeechToText();
+  final SpeechToText _stt = SpeechToText();
   final FlutterTts _tts = FlutterTts();
-  final AudioPlayer _player = AudioPlayer();
-  final TextEditingController _input = TextEditingController();
-  late final AnimationController _anim;
+  final GeminiService _gemini = GeminiService();
 
-  int _tab = 0, _gen = 0;
-  bool _ready = false, _listening = false, _busy = false, _standby = false;
-  bool _cmdMode = false, _speaking = false, _starting = false, _teacher = false;
-  String _status = '', _action = '';
-  String _user = 'Boss', _wake = 'power', _provider = 'auto', _gKey = '', _qKey = '';
-  String _themeName = 'Crimson Core', _wall = '';
-  String? _gModel, _qModel, _ttsModel;
-  String _voice = 'Breezy', _persona = 'Friendly', _aname = 'MAX', _ttsErr = '';
-  bool _natural = true, _conv = true;
-  List<Contact>? _contactsCache;
-  List<String> _memory = [], _notes = [];
-  List<Map<String, String>> _chat = [];
+  Phase phase = Phase.idle;
+  String status = 'Initializing…';
+  bool isError = false;
+  bool standby = false;
+  String command = 'hello';
+  String reply = '';
+  String apiKey = '';
+  String assistantName = 'Riya';
+  double voicePitch = 1.3;
+  double voiceRate = 0.48;
+  String? voiceName;
+  final List<ChatMessage> chat = [];
 
-  Color get _accent => _themes[_themeName] ?? _themes.values.first;
+  bool _sttReady = false;
+  bool _wakeListening = false;
+  bool _commandHandled = false;
+  bool _disposed = false;
+  String _lastWords = '';
 
-  @override
-  void initState() {
-    super.initState();
-    _anim = AnimationController(vsync: this, duration: const Duration(seconds: 8))..repeat();
-    _load();
-    _tts.setLanguage('hi-IN');
-    _tts.setSpeechRate(0.5);
-    _tts.setPitch(0.95);
-    _tts.awaitSpeakCompletion(true);
-    [Permission.microphone, Permission.camera, Permission.phone, Permission.contacts].request();
+  bool get hasKey => apiKey.trim().isNotEmpty;
+
+  void _notify() {
+    if (!_disposed) notifyListeners();
+  }
+
+  void _set(Phase p, String s, {bool error = false}) {
+    phase = p;
+    status = s;
+    isError = error;
+    _notify();
+  }
+
+  void _setIdle(String s, {bool error = false, int wakeDelayMs = 700}) {
+    _set(Phase.idle, s, error: error);
+    _scheduleWake(wakeDelayMs);
+  }
+
+  Future<void> _init() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      apiKey = prefs.getString(_prefKey) ?? _envKey;
+      standby = prefs.getBool(_prefStandby) ?? false;
+      assistantName = prefs.getString('assistant_name') ?? 'Riya';
+      voicePitch = prefs.getDouble('voice_pitch') ?? 1.3;
+      voiceRate = prefs.getDouble('voice_rate') ?? 0.48;
+      voiceName = prefs.getString('voice_name');
+      _gemini.assistantName = assistantName;
+    } catch (_) {
+      apiKey = _envKey;
+    }
+
+    try {
+      await _tts.awaitSpeakCompletion(true);
+      final hi = await _tts.isLanguageAvailable('hi-IN');
+      await _tts.setLanguage(hi == true ? 'hi-IN' : 'en-US');
+      await applyVoice();
+    } catch (_) {
+      // TTS is optional; the UI still shows replies as text.
+    }
+
+    await _initSpeech();
+
+    if (!_sttReady) {
+      _set(Phase.idle,
+          'Microphone or speech service unavailable. Allow microphone access and install Google speech services.',
+          error: true);
+    } else if (!hasKey) {
+      _set(Phase.idle, 'API key missing. Open Settings to add your Gemini key.',
+          error: true);
+    } else {
+      _setIdle(standby
+          ? 'Standby active. Say "Hello Power".'
+          : 'Ready. Tap the arc reactor to give a command.');
+    }
+  }
+
+  Future<void> applyVoice() async {
+    try {
+      if (voiceName != null && voiceName!.contains('|')) {
+        final p = voiceName!.split('|');
+        await _tts.setVoice({'name': p[0], 'locale': p[1]});
+      }
+      await _tts.setSpeechRate(voiceRate);
+      await _tts.setPitch(voicePitch);
+    } catch (_) {}
+  }
+
+  Future<List<Map<String, String>>> listVoices() async {
+    try {
+      final raw = await _tts.getVoices;
+      final out = <Map<String, String>>[];
+      if (raw is List) {
+        for (final v in raw) {
+          if (v is! Map) continue;
+          final loc = (v['locale'] ?? '').toString();
+          if (loc.startsWith('hi') || loc.startsWith('en-IN') || loc.startsWith('en_IN')) {
+            out.add({'name': v['name'].toString(), 'locale': loc});
+          }
+        }
+      }
+      out.sort((a, b) => a['name']!.compareTo(b['name']!));
+      return out;
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<void> saveVoice({String? voice, double? pitch, double? rate, String? name}) async {
+    if (voice != null) voiceName = voice;
+    if (pitch != null) voicePitch = pitch;
+    if (rate != null) voiceRate = rate;
+    if (name != null) {
+      assistantName = name.trim().isEmpty ? 'Riya' : name.trim();
+      _gemini.assistantName = assistantName;
+    }
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('assistant_name', assistantName);
+      await prefs.setDouble('voice_pitch', voicePitch);
+      await prefs.setDouble('voice_rate', voiceRate);
+      if (voiceName != null) await prefs.setString('voice_name', voiceName!);
+    } catch (_) {}
+    await applyVoice();
+  }
+
+  Future<void> previewVoice() =>
+      _speak('हाय बॉस, मैं $assistantName हूँ। बताइए, आज क्या करना है?');
+
+  Future<void> sendText(String text) async {
+    final t = text.trim();
+    if (t.isEmpty || phase != Phase.idle) return;
+    _wakeListening = false;
+    try {
+      if (_stt.isListening) await _stt.cancel();
+    } catch (_) {}
+    command = t;
+    await _process(t);
+  }
+
+  Future<void> _initSpeech() async {
+    try {
+      _sttReady = await _stt.initialize(
+        onError: _onError,
+        onStatus: _onStatus,
+      );
+    } catch (_) {
+      _sttReady = false;
+    }
+  }
+
+  // ── Settings ──
+  Future<void> saveApiKey(String key) async {
+    apiKey = key.trim();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_prefKey, apiKey);
+    } catch (_) {}
+    if (phase == Phase.idle) {
+      if (hasKey) {
+        _setIdle('API key saved. Tap the arc reactor to give a command.');
+      } else {
+        _set(Phase.idle, 'API key missing. Open Settings to add your Gemini key.',
+            error: true);
+      }
+    }
+  }
+
+  Future<void> setStandby(bool value) async {
+    standby = value;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_prefStandby, value);
+    } catch (_) {}
+
+    if (value) {
+      if (phase == Phase.idle) {
+        _setIdle('Standby active. Say "Hello Power".', wakeDelayMs: 200);
+      } else {
+        _notify();
+      }
+    } else {
+      _wakeListening = false;
+      if (phase == Phase.idle) {
+        try {
+          await _stt.cancel();
+        } catch (_) {}
+        _set(Phase.idle, 'Standby off. Tap the arc reactor to give a command.');
+      } else {
+        _notify();
+      }
+    }
+  }
+
+  // ── Reactor tap ──
+  Future<void> onReactorTap() async {
+    if (!_sttReady) {
+      await _initSpeech();
+      if (!_sttReady) {
+        _set(Phase.idle,
+            'Microphone permission denied or speech service missing. Enable it in Android settings.',
+            error: true);
+        return;
+      }
+    }
+    switch (phase) {
+      case Phase.idle:
+        await _startCommand();
+        break;
+      case Phase.listening:
+        try {
+          await _stt.stop();
+        } catch (_) {}
+        break;
+      case Phase.speaking:
+        try {
+          await _tts.stop();
+        } catch (_) {}
+        _setIdle('Stopped. Tap the arc reactor to give a command.');
+        break;
+      case Phase.thinking:
+        break;
+    }
+  }
+
+  // ── Command flow ──
+  Future<void> _startCommand() async {
+    _wakeListening = false;
+    try {
+      if (_stt.isListening) await _stt.cancel();
+    } catch (_) {}
+
+    _commandHandled = false;
+    _lastWords = '';
+    _set(Phase.listening, 'Listening… speak now, Boss.');
+
+    try {
+      await _stt.listen(
+        onResult: _onCommandResult,
+        listenFor: const Duration(seconds: 20),
+        pauseFor: const Duration(seconds: 3),
+        listenOptions: SpeechListenOptions(
+          partialResults: true,
+          cancelOnError: true,
+        ),
+      );
+    } catch (_) {
+      _setIdle('Could not start the microphone. Try again.', error: true);
+    }
+  }
+
+  void _onCommandResult(SpeechRecognitionResult result) {
+    if (phase != Phase.listening) return;
+    _lastWords = result.recognizedWords;
+    if (_lastWords.isNotEmpty) command = _lastWords;
+    _notify();
+    if (result.finalResult) _handleCommand();
+  }
+
+  void _handleCommand() {
+    if (_commandHandled) return;
+    _commandHandled = true;
+    final text = _lastWords.trim();
+    if (text.isEmpty) {
+      _setIdle('Did not catch that. Tap the arc reactor and try again.');
+      return;
+    }
+    _process(text);
+  }
+
+  Future<void> _process(String text) async {
+    chat.add(ChatMessage(true, text));
+    _set(Phase.thinking, 'Contacting Gemini…');
+    try {
+      final answer = await _gemini.ask(text, apiKey);
+      reply = answer;
+      chat.add(ChatMessage(false, answer));
+      _set(Phase.speaking, 'Speaking…');
+      await _speak(answer);
+      if (phase == Phase.speaking) {
+        _setIdle(standby
+            ? 'Standby active. Say "Hello Power".'
+            : 'Ready. Tap the arc reactor to give a command.');
+      }
+    } on GeminiException catch (e) {
+      reply = '';
+      _set(Phase.speaking, e.message, error: true);
+      await _speak('सॉरी बॉस, यह नहीं हो पाया।');
+      _setIdle(e.message, error: true);
+    } catch (_) {
+      reply = '';
+      _setIdle('Something went wrong. Please try again.', error: true);
+    }
+  }
+
+  Future<void> _speak(String text) async {
+    try {
+      final clean = text.replaceAll(RegExp(r'[*_`#]'), '');
+      await _tts.speak(clean);
+    } catch (_) {}
+  }
+
+  // ── Wake word flow ──
+  void _scheduleWake(int delayMs) {
+    if (!standby || _disposed) return;
+    Future.delayed(Duration(milliseconds: delayMs), _startWake);
+  }
+
+  Future<void> _startWake() async {
+    if (_disposed || !standby || phase != Phase.idle || _wakeListening) return;
+    if (!_sttReady) return;
+    try {
+      if (_stt.isListening) return;
+      _wakeListening = true;
+      await _stt.listen(
+        onResult: _onWakeResult,
+        listenFor: const Duration(seconds: 60),
+        pauseFor: const Duration(seconds: 8),
+        listenOptions: SpeechListenOptions(
+          partialResults: true,
+          cancelOnError: true,
+        ),
+      );
+    } catch (_) {
+      _wakeListening = false;
+      _scheduleWake(3000);
+    }
+  }
+
+  void _onWakeResult(SpeechRecognitionResult result) {
+    if (!_wakeListening || phase != Phase.idle) return;
+    final heard = result.recognizedWords.toLowerCase();
+    if (_wakePattern.hasMatch(heard)) _onWakeDetected();
+  }
+
+  Future<void> _onWakeDetected() async {
+    _wakeListening = false;
+    _set(Phase.speaking, 'Wake word detected.');
+    try {
+      await _stt.cancel();
+    } catch (_) {}
+    await _speak('हाँ बॉस, बोलिए?');
+    await Future.delayed(const Duration(milliseconds: 200));
+    await _startCommand();
+  }
+
+  // ── Speech callbacks ──
+  void _onStatus(String s) {
+    if (s != 'done' && s != 'notListening') return;
+    if (phase == Phase.listening) {
+      Future.delayed(const Duration(milliseconds: 300), () {
+        if (phase == Phase.listening) _handleCommand();
+      });
+    } else if (_wakeListening && phase == Phase.idle) {
+      _wakeListening = false;
+      _scheduleWake(500);
+    }
+  }
+
+  void _onError(SpeechRecognitionError e) {
+    final benign =
+        e.errorMsg == 'error_speech_timeout' || e.errorMsg == 'error_no_match';
+    final denied = e.errorMsg == 'error_permission';
+
+    if (phase == Phase.listening) {
+      if (_commandHandled) return;
+      if (benign && _lastWords.trim().isNotEmpty) {
+        _handleCommand();
+        return;
+      }
+      _commandHandled = true;
+      if (denied) {
+        _setIdle('Microphone permission denied. Enable it in Android settings.',
+            error: true, wakeDelayMs: 5000);
+      } else if (benign) {
+        _setIdle('Did not catch that. Tap the arc reactor and try again.');
+      } else {
+        _setIdle('Speech error: ${e.errorMsg}. Try again.', error: true);
+      }
+    } else if (phase == Phase.idle && _wakeListening) {
+      _wakeListening = false;
+      _scheduleWake(benign ? 500 : 3000);
+    }
   }
 
   @override
   void dispose() {
-    _anim.dispose();
-    _input.dispose();
-    _speech.stop();
+    _disposed = true;
+    _stt.cancel();
     _tts.stop();
-    _player.dispose();
     super.dispose();
   }
+}
 
-  // ------------------------------------------------------------ storage
-  Future<void> _load() async {
-    final p = await SharedPreferences.getInstance();
-    if (!mounted) return;
-    setState(() {
-      _user = p.getString('user') ?? 'Boss';
-      _wake = p.getString('wake') ?? 'power';
-      _provider = p.getString('provider') ?? 'auto';
-      _gKey = _clean(p.getString('gkey') ?? '');
-      _qKey = _clean(p.getString('qkey') ?? '');
-      _themeName = p.getString('theme') ?? 'Crimson Core';
-      _wall = p.getString('wall') ?? '';
-      _voice = p.getString('voice') ?? 'Breezy';
-      _persona = p.getString('persona') ?? 'Friendly';
-      _aname = p.getString('aname') ?? 'MAX';
-      _natural = p.getBool('natural') ?? true;
-      _conv = p.getBool('conv') ?? true;
-      _memory = p.getStringList('memory') ?? [];
-      _notes = p.getStringList('notes') ?? [];
-      _chat = (p.getStringList('chat') ?? [])
-          .map((s) => Map<String, String>.from(jsonDecode(s) as Map))
-          .toList();
-    });
-  }
+// ─────────────────────────────────────────────────────────────
+// App
+// ─────────────────────────────────────────────────────────────
+void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
+    statusBarColor: Colors.transparent,
+    statusBarIconBrightness: Brightness.light,
+    systemNavigationBarColor: kBlack,
+    systemNavigationBarIconBrightness: Brightness.light,
+  ));
+  pageNotifier.addListener(() {
+    final page = pageNotifier.value;
+    if (page == null) return;
+    pageNotifier.value = null;
+    navKey.currentState?.push(
+      MaterialPageRoute(builder: (_) => PageViewerScreen(page: page)),
+    );
+  });
+  runApp(
+    ChangeNotifierProvider(
+      create: (_) => AssistantController(),
+      child: const JarvisApp(),
+    ),
+  );
+}
 
-  Future<void> _put(String k, String v) async {
-    final p = await SharedPreferences.getInstance();
-    await p.setString(k, v);
-  }
+class JarvisApp extends StatelessWidget {
+  const JarvisApp({super.key});
 
-  Future<void> _putList(String k, List<String> v) async {
-    final p = await SharedPreferences.getInstance();
-    await p.setStringList(k, v);
-  }
-
-  Future<void> _saveChat() =>
-      _putList('chat', _chat.skip(math.max(0, _chat.length - 100)).map((m) => jsonEncode(m)).toList());
-
-  // ------------------------------------------------------------- speech
-  void _onStatus(String s) {
-    if (s == 'done' || s == 'notListening') {
-      if (mounted) setState(() => _listening = false);
-      _restart(const Duration(milliseconds: 400));
-    }
-  }
-
-  void _onError(dynamic e) {
-    if (mounted) setState(() => _listening = false);
-    _restart(const Duration(milliseconds: 1500));
-  }
-
-  void _restart(Duration d) {
-    if (!_standby) return;
-    Future.delayed(d, () {
-      if (mounted && _standby && !_speech.isListening && !_speaking && !_busy && !_starting) {
-        _listen(command: false);
-      }
-    });
-  }
-
-  Future<void> _listen({required bool command}) async {
-    if (_starting) return;
-    if (!_ready) {
-      try {
-        _ready = await _speech.initialize(onStatus: _onStatus, onError: _onError);
-      } catch (_) {
-        _ready = false;
-      }
-    }
-    if (!_ready) {
-      _say('Mic ya speech permission nahi mili, $_user.');
-      return;
-    }
-    if (_speech.isListening) return;
-    _starting = true;
-    _cmdMode = command;
-    if (command && mounted) setState(() => _status = 'Sun raha hoon...');
-    try {
-      await _speech.listen(
-        onResult: _onResult,
-        localeId: 'en_IN',
-        listenFor: Duration(seconds: command ? 20 : 60),
-        pauseFor: Duration(seconds: command ? 3 : 4),
-        listenOptions: stt.SpeechListenOptions(partialResults: true, cancelOnError: false),
-      );
-      if (mounted) setState(() => _listening = true);
-    } catch (_) {
-      if (mounted) setState(() => _listening = false);
-    } finally {
-      _starting = false;
-    }
-  }
-
-  String? _afterWake(String l) {
-    final w = _wake.toLowerCase().trim();
-    if (w.isEmpty) return null;
-    for (final p in ['wake up $w', 'hello $w', 'hey $w', w]) {
-      final m = RegExp('\\b${RegExp.escape(p)}\\b').firstMatch(l);
-      if (m != null) return l.substring(m.end).trim();
-    }
-    return null;
-  }
-
-  void _onResult(SpeechRecognitionResult r) {
-    final w = r.recognizedWords.trim();
-    if (mounted) setState(() => _status = w);
-    if (!r.finalResult || w.isEmpty) return;
-    if (_cmdMode) {
-      _cmdMode = false;
-      _process(w, voice: true);
-      return;
-    }
-    final rest = _afterWake(w.toLowerCase());
-    if (rest == null) return;
-    if (rest.length > 2) {
-      _process(rest, voice: true);
-    } else {
-      _say('Boliye $_user, main sun raha hoon.', next: true);
-    }
-  }
-
-  void _toggleStandby() {
-    setState(() => _standby = !_standby);
-    if (_standby) {
-      _say("Standby on ho gaya, $_user. 'Hey $_wake' bolkar bulaiye.");
-    } else {
-      _cmdMode = false;
-      _speech.stop();
-      setState(() => _listening = false);
-      _say('Standby off kar diya.');
-    }
-  }
-
-  void _mic() {
-    if (_speech.isListening) {
-      _cmdMode = false;
-      _speech.stop();
-    } else {
-      _stopVoice();
-      _listen(command: true);
-    }
-  }
-
-  void _stopVoice() {
-    _gen++;
-    _speaking = false;
-    _tts.stop();
-    _player.stop();
-  }
-
-  Future<void> _say(String text, {bool next = false, bool follow = false}) async {
-    final g = ++_gen;
-    if (mounted) setState(() => _status = text);
-    _speaking = true;
-    final clean = text.replaceAll(RegExp(r'[*#`_~]'), '');
-    try {
-      if (_speech.isListening) await _speech.stop();
-      await _tts.stop();
-      await _player.stop();
-      var ok = false;
-      if (_natural && _gKey.isNotEmpty) {
-        _ttsErr = '';
-        ok = await _speakGemini(clean, g);
-      }
-      if (!ok && g == _gen) await _tts.speak(clean);
-    } catch (_) {}
-    if (g != _gen) return;
-    _speaking = false;
-    if (!mounted) return;
-    await Future.delayed(const Duration(milliseconds: 300)); // echo guard
-    if (g != _gen || !mounted) return;
-    if (next || follow) {
-      _listen(command: true);
-    } else if (_standby) {
-      _listen(command: false);
-    }
-  }
-
-  // Gemini TTS: natural insaani awaaz
-  Future<String> _ttsModelName() async {
-    if (_ttsModel != null) return _ttsModel!;
-    try {
-      final res = await _gSend('models?pageSize=200', t: const Duration(seconds: 15));
-      if (res.statusCode == 200) {
-        final names = (jsonDecode(res.body)['models'] as List)
-            .where((m) => (m['supportedGenerationMethods'] as List?)?.contains('generateContent') ?? false)
-            .map((m) => m['name'].toString().replaceFirst('models/', ''))
-            .where((n) => n.contains('tts'))
-            .toList()
-          ..sort((a, b) => b.compareTo(a));
-        final flash = names.where((n) => n.contains('flash')).toList();
-        if (flash.isNotEmpty) return _ttsModel = flash.first;
-        if (names.isNotEmpty) return _ttsModel = names.first;
-      }
-    } catch (_) {}
-    return _ttsModel = 'gemini-2.5-flash-preview-tts';
-  }
-
-  Uint8List _wav(Uint8List pcm, int rate) {
-    final h = ByteData(44);
-    void tag(int o, String t) {
-      for (var i = 0; i < 4; i++) {
-        h.setUint8(o + i, t.codeUnitAt(i));
-      }
-    }
-
-    tag(0, 'RIFF');
-    h.setUint32(4, 36 + pcm.length, Endian.little);
-    tag(8, 'WAVE');
-    tag(12, 'fmt ');
-    h.setUint32(16, 16, Endian.little);
-    h.setUint16(20, 1, Endian.little);
-    h.setUint16(22, 1, Endian.little);
-    h.setUint32(24, rate, Endian.little);
-    h.setUint32(28, rate * 2, Endian.little);
-    h.setUint16(32, 2, Endian.little);
-    h.setUint16(34, 16, Endian.little);
-    tag(36, 'data');
-    h.setUint32(40, pcm.length, Endian.little);
-    return Uint8List.fromList([...h.buffer.asUint8List(), ...pcm]);
-  }
-
-  Future<bool> _speakGemini(String text, int g) async {
-    var t = text.trim();
-    if (t.isEmpty || _gKey.isEmpty) return false;
-    if (t.length > 500) t = t.substring(0, 500);
-    try {
-      final model = await _ttsModelName();
-      final res = await _gSend('models/$model:generateContent', body: {
-        'contents': [
-          {'parts': [{'text': 'Say in a natural, warm, friendly human tone: $t'}]}
-        ],
-        'generationConfig': {
-          'responseModalities': ['AUDIO'],
-          'speechConfig': {
-            'voiceConfig': {'prebuiltVoiceConfig': {'voiceName': _voices[_voice] ?? 'Aoede'}}
-          },
-        },
-      });
-      if (res.statusCode != 200) {
-        _ttsErr = 'code ${res.statusCode}';
-        return false;
-      }
-      final part = jsonDecode(res.body)['candidates']?[0]?['content']?['parts']?[0]?['inlineData'];
-      if (part == null) {
-        _ttsErr = 'audio nahi mila';
-        return false;
-      }
-      final mime = '${part['mimeType'] ?? ''}';
-      final rate = int.tryParse(RegExp(r'rate=(\d+)').firstMatch(mime)?.group(1) ?? '') ?? 24000;
-      final pcm = base64Decode('${part['data']}');
-      if (g != _gen) return true;
-      final dir = await getTemporaryDirectory();
-      final f = File('${dir.path}/max_voice.wav');
-      await f.writeAsBytes(_wav(pcm, rate), flush: true);
-      if (g != _gen) return true;
-      final done = _player.onPlayerStateChange
-          .firstWhere((st) => st == PlayerState.completed || st == PlayerState.stopped);
-      await _player.play(DeviceFileSource(f.path));
-      await done.timeout(const Duration(seconds: 90));
-      return true;
-    } on TimeoutException {
-      return true;
-    } catch (e) {
-      _ttsErr = '$e'.split('\n').first;
-      return false;
-    }
-  }
-
-  String get _personaLine => _personas[_persona] ?? '';
-
-  // -------------------------------------------------------------- agent
-  String get _sys => """You are $_aname, a loyal, smart personal AI agent living inside the user's Android phone. The user is called '$_user'. Now: ${DateTime.now().toIso8601String()} (IST).
-Reply in natural Hinglish; 'say' is spoken aloud: max 3 short sentences, no markdown. $_personaLine${_teacher ? ' MODE English Teacher: reply in simple English, gently correct the user mistakes and ask one follow-up question.' : ''}
-Long-term memory: ${_memory.isEmpty ? 'none' : _memory.join('; ')}
-Reply with ONLY one JSON object: {"action":"<tool or none>","args":{},"say":"<speech>"}. Use "none" to chat or to ask for a missing detail. INFO tools return a TOOL_RESULT, then answer with action "none". Never invent phone numbers.
-TOOLS: call{to} sms{to,text} whatsapp{to,text} open_app{name,package?} alarm{hour,minute,label} flashlight{state:on|off} youtube{query} maps{query} shop{platform:flipkart|amazon|meesho,query} open_url{url} remember{fact} save_note{text} read_notes{}INFO weather{city}INFO web_search{query}INFO now{}INFO lookup_number{number}INFO""";
-
-  Map<String, dynamic>? _json(String raw) {
-    final s = raw.indexOf('{'), e = raw.lastIndexOf('}');
-    if (s < 0 || e <= s) return null;
-    try {
-      final m = jsonDecode(raw.substring(s, e + 1));
-      return m is Map<String, dynamic> ? m : null;
-    } catch (_) {
-      return null;
-    }
-  }
-
-  Future<void> _process(String text, {bool mission = false, bool voice = false}) async {
-    if (_busy || text.trim().isEmpty) return;
-    if (RegExp(r'\b(chup|stop speaking|bas karo)\b').hasMatch(text.toLowerCase())) {
-      _stopVoice();
-      return;
-    }
-    if (_gKey.isEmpty && _qKey.isEmpty) {
-      _say('Pehle Settings mein Gemini ya Groq key daaliye, $_user.');
-      return;
-    }
-    setState(() {
-      _busy = true;
-      _status = '';
-      _action = '';
-    });
-    final msgs = <Map<String, String>>[
-      for (final m in _chat.reversed.take(8).toList().reversed) {'role': m['role'] ?? 'user', 'content': m['text'] ?? ''},
-      {'role': 'user', 'content': text},
-    ];
-    while (msgs.length > 1 && msgs.first['role'] != 'user') {
-      msgs.removeAt(0);
-    }
-    String say = '', last = '';
-    try {
-      for (var i = 0; i < (mission ? 8 : 4); i++) {
-        final raw = await _llm(msgs);
-        final j = _json(raw);
-        if (j == null) {
-          say = raw.trim();
-          break;
-        }
-        final act = '${j['action'] ?? 'none'}';
-        final s = '${j['say'] ?? ''}'.trim();
-        final args = j['args'] is Map ? Map<String, dynamic>.from(j['args'] as Map) : <String, dynamic>{};
-        if (s.isNotEmpty) say = s;
-        if (act == 'none' || act.isEmpty) break;
-        if (mounted) setState(() => _action = '⚙ $act');
-        last = await _tool(act, args);
-        if (_info.contains(act) || (mission && !last.startsWith('Failed'))) {
-          msgs.add({'role': 'assistant', 'content': raw});
-          msgs.add({'role': 'user', 'content': 'TOOL_RESULT[$act]: $last. Continue or finish with action none.'});
-          continue;
-        }
-        if (last.startsWith('Failed')) say = last;
-        break;
-      }
-      if (say.isEmpty) say = last.isNotEmpty ? last : 'Kaam ho gaya, $_user.';
-      _chat.add({'role': 'user', 'text': text});
-      _chat.add({'role': 'assistant', 'text': say});
-      _saveChat();
-    } on AiException catch (e) {
-      say = e.message;
-    } catch (_) {
-      say = 'Network error aa gaya hai, $_user.';
-    }
-    if (mounted) setState(() => _busy = false);
-    await _say(say, follow: voice && _conv);
-  }
-
-  // -------------------------------------------------------------- tools
-  String _s(dynamic v) => (v ?? '').toString().trim();
-  String _digits(String s) => s.replaceAll(RegExp(r'[^0-9]'), '');
-
-  Future<bool> _open(String u, [bool ext = true]) async {
-    try {
-      return await launchUrl(Uri.parse(u), mode: ext ? LaunchMode.externalApplication : LaunchMode.platformDefault);
-    } catch (_) {
-      return false;
-    }
-  }
-
-  Future<List<Contact>> _contacts({bool fresh = false}) async {
-    if (!fresh && _contactsCache != null) return _contactsCache!;
-    if (!await FlutterContacts.requestPermission(readonly: true)) return [];
-    return _contactsCache = await FlutterContacts.getContacts(withProperties: true);
-  }
-
-  Future<String?> _phone(String q) async {
-    final d = q.replaceAll(RegExp(r'[^0-9+]'), '');
-    if (_digits(d).length >= 6) return d;
-    final n = q.toLowerCase().trim();
-    if (n.isEmpty) return null;
-    final list = (await _contacts()).where((c) => c.phones.isNotEmpty).toList();
-    for (final c in list) {
-      if (c.displayName.toLowerCase() == n) return c.phones.first.number;
-    }
-    for (final c in list) {
-      if (c.displayName.toLowerCase().contains(n)) return c.phones.first.number;
-    }
-    return null;
-  }
-
-  Future<String> _tool(String tool, Map<String, dynamic> a) async {
-    try {
-      switch (tool) {
-        case 'call':
-          {
-            final n = await _phone(_s(a['to']));
-            if (n == null) return "Failed: '${_s(a['to'])}' contacts mein nahi mila, $_user.";
-            await _open('tel:$n', false);
-            return 'Call laga raha hoon.';
-          }
-        case 'sms':
-          {
-            final n = await _phone(_s(a['to']));
-            if (n == null) return "Failed: '${_s(a['to'])}' ka number nahi mila.";
-            await _open('sms:$n?body=${Uri.encodeComponent(_s(a['text']))}', false);
-            return 'SMS ready hai, bas send dabaiye.';
-          }
-        case 'whatsapp':
-          {
-            final to = _s(a['to']), text = _s(a['text']);
-            final n = to.isEmpty ? null : await _phone(to);
-            if (to.isNotEmpty && n == null) return "Failed: '$to' ka number nahi mila.";
-            var url = 'https://wa.me/';
-            if (n != null) {
-              var d = _digits(n);
-              if (d.length == 10) d = '91$d';
-              url += d;
-            }
-            if (text.isNotEmpty) url += '?text=${Uri.encodeComponent(text)}';
-            await _open(url);
-            return 'WhatsApp khol diya.';
-          }
-        case 'open_app':
-          {
-            final q = _s(a['name']).toLowerCase();
-            if (q.contains('camera')) {
-              await const AndroidIntent(action: 'android.media.action.STILL_IMAGE_CAMERA').launch();
-              return 'Camera khol diya.';
-            }
-            if (q.contains('setting')) {
-              await const AndroidIntent(action: 'android.settings.SETTINGS').launch();
-              return 'Settings khol di.';
-            }
-            String? pkg = _s(a['package']).isEmpty ? null : _s(a['package']);
-            if (pkg == null) {
-              for (final e in _apps.entries) {
-                if (q.contains(e.key)) {
-                  pkg = e.value;
-                  break;
-                }
-              }
-            }
-            if (pkg == null) {
-              await _open('https://play.google.com/store/search?q=${Uri.encodeComponent(q)}&c=apps');
-              return 'Yeh app listed nahi hai, Play Store mein search khol diya.';
-            }
-            try {
-              await AndroidIntent(
-                action: 'android.intent.action.MAIN',
-                category: 'android.intent.category.LAUNCHER',
-                package: pkg,
-                flags: <int>[0x10000000],
-              ).launch();
-              return '$q khol diya.';
-            } catch (_) {
-              await _open('https://play.google.com/store/apps/details?id=$pkg');
-              return '$q phone mein nahi mili, Play Store khol diya.';
-            }
-          }
-        case 'alarm':
-          {
-            final h = int.tryParse(_s(a['hour']));
-            final m = int.tryParse(_s(a['minute'])) ?? 0;
-            if (h == null) return 'Failed: alarm ka time samajh nahi aaya.';
-            await AndroidIntent(action: 'android.intent.action.SET_ALARM', arguments: <String, dynamic>{
-              'android.intent.extra.alarm.HOUR': h,
-              'android.intent.extra.alarm.MINUTES': m,
-              'android.intent.extra.alarm.MESSAGE': _s(a['label']).isEmpty ? 'MAX' : _s(a['label']),
-              'android.intent.extra.alarm.SKIP_UI': true,
-            }).launch();
-            return 'Alarm ${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')} par set ho gaya.';
-          }
-        case 'flashlight':
-          {
-            if (_s(a['state']).toLowerCase() == 'off') {
-              await TorchLight.disableTorch();
-              return 'Flashlight band.';
-            }
-            await TorchLight.enableTorch();
-            return 'Flashlight chalu.';
-          }
-        case 'youtube':
-          {
-            final q = _s(a['query']);
-            await _open(q.isEmpty
-                ? 'https://www.youtube.com'
-                : 'https://www.youtube.com/results?search_query=${Uri.encodeComponent(q)}');
-            return 'YouTube khol diya.';
-          }
-        case 'maps':
-          await _open('https://www.google.com/maps/search/?api=1&query=${Uri.encodeComponent(_s(a['query']))}');
-          return 'Maps khol diya.';
-        case 'shop':
-          {
-            final p = _s(a['platform']).toLowerCase();
-            final e = Uri.encodeComponent(_s(a['query']));
-            await _open(p.contains('meesho')
-                ? 'https://www.meesho.com/search?q=$e'
-                : p.contains('amazon')
-                    ? 'https://www.amazon.in/s?k=$e'
-                    : 'https://www.flipkart.com/search?q=$e');
-            return 'Search khol diya.';
-          }
-        case 'open_url':
-          {
-            var u = _s(a['url']);
-            if (!u.startsWith('http')) u = 'https://$u';
-            await _open(u);
-            return 'Link khol diya.';
-          }
-        case 'remember':
-          _memory.add(_s(a['fact']));
-          if (_memory.length > 40) _memory.removeAt(0);
-          await _putList('memory', _memory);
-          return 'Yaad rakh liya.';
-        case 'save_note':
-          _notes.add('${DateTime.now().toString().substring(0, 16)} - ${_s(a['text'])}');
-          await _putList('notes', _notes);
-          return 'Note save kar liya.';
-        case 'read_notes':
-          return _notes.isEmpty ? 'Koi note nahi hai.' : _notes.reversed.take(10).join(' | ');
-        case 'now':
-          return DateTime.now().toString();
-        case 'weather':
-          return await _weather(_s(a['city']));
-        case 'web_search':
-          return await _web(_s(a['query']));
-        case 'lookup_number':
-          {
-            final d = _digits(_s(a['number']));
-            if (d.length < 6) return 'Number valid nahi hai.';
-            final last = d.length > 10 ? d.substring(d.length - 10) : d;
-            for (final c in await _contacts(fresh: true)) {
-              for (final p in c.phones) {
-                if (_digits(p.number).endsWith(last)) return 'Yeh number ${c.displayName} ka hai.';
-              }
-            }
-            await _open('https://www.truecaller.com/search/in/$last');
-            return 'Contacts mein nahi mila, Truecaller search khol diya.';
-          }
-        default:
-          return "Failed: '$tool' tool mere paas nahi hai.";
-      }
-    } catch (_) {
-      return 'Failed: $tool nahi chal paya.';
-    }
-  }
-
-  Future<String> _weather(String city) async {
-    if (city.isEmpty) return 'City ka naam batayein.';
-    final g = await http
-        .get(Uri.parse('https://geocoding-api.open-meteo.com/v1/search?count=1&name=${Uri.encodeComponent(city)}'))
-        .timeout(const Duration(seconds: 15));
-    final res = (jsonDecode(g.body)['results'] as List?) ?? [];
-    if (res.isEmpty) return "'$city' city nahi mili.";
-    final r = res.first;
-    final w = await http
-        .get(Uri.parse('https://api.open-meteo.com/v1/forecast?latitude=${r['latitude']}&longitude=${r['longitude']}'
-            '&current=temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code&timezone=auto'))
-        .timeout(const Duration(seconds: 15));
-    final c = jsonDecode(w.body)['current'];
-    return "${r['name']}: ${c['temperature_2m']}°C, humidity ${c['relative_humidity_2m']}%, "
-        "wind ${c['wind_speed_10m']} km/h, weather_code ${c['weather_code']}";
-  }
-
-  Future<String> _web(String q) async {
-    if (q.isEmpty) return 'Kya search karna hai?';
-    if (_gKey.isNotEmpty) {
-      try {
-        final model = await _gemModel();
-        final res = await _gSend('models/$model:generateContent', body: {
-          'contents': [
-            {'role': 'user', 'parts': [{'text': 'Answer briefly with latest facts: $q'}]}
-          ],
-          'tools': [{'google_search': {}}],
-        });
-        if (res.statusCode == 200) {
-          final parts = jsonDecode(res.body)['candidates']?[0]?['content']?['parts'] as List?;
-          final t = parts?.map((p) => p['text'] ?? '').join().toString().trim() ?? '';
-          if (t.isNotEmpty) return t;
-        }
-      } catch (_) {}
-    }
-    try {
-      final res = await http
-          .get(Uri.parse('https://api.duckduckgo.com/?q=${Uri.encodeComponent(q)}&format=json&no_html=1&skip_disambig=1'))
-          .timeout(const Duration(seconds: 15));
-      final d = jsonDecode(res.body);
-      final abs = _s(d['AbstractText']);
-      if (abs.isNotEmpty) return abs;
-      final rel = (d['RelatedTopics'] as List? ?? []).take(3).map((e) => _s(e['Text'])).where((e) => e.isNotEmpty);
-      if (rel.isNotEmpty) return rel.join(' | ');
-    } catch (_) {}
-    return 'Web par kuch nahi mila.';
-  }
-
-  // ---------------------------------------------------------- LLM layer
-  Future<String> _llm(List<Map<String, String>> msgs) async {
-    final order = <String>[
-      if (_provider == 'groq' && _qKey.isNotEmpty) 'groq',
-      if (_gKey.isNotEmpty) 'gemini',
-      if (_qKey.isNotEmpty && _provider != 'groq') 'groq',
-    ];
-    String err = 'API key nahi mili.';
-    for (final p in order.toSet()) {
-      try {
-        return p == 'gemini' ? await _gemini(msgs) : await _groq(msgs);
-      } on AiException catch (e) {
-        err = e.message;
-      } catch (_) {
-        err = '${p == 'gemini' ? 'Gemini' : 'Groq'}: network error.';
-      }
-    }
-    throw AiException(err);
-  }
-
-  // ------------------------------------------------ Gemini key helpers
-  static const _gBase = 'https://generativelanguage.googleapis.com/v1beta/';
-  static const _gFallback = <String>['gemini-flash-latest', 'gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-2.5-flash'];
-
-  // key se quotes, space, newline hata deta hai (AIza... aur AQ. dono ke liye)
-  String _clean(String k) => k.replaceAll(RegExp('["\'\\s]'), '');
-
-  String _mask(String k) => k.length > 10 ? '${k.substring(0, 4)}...${k.substring(k.length - 4)}' : 'Saved';
-
-  Map<String, String> _gHdr(bool bearer) => {
-        'Content-Type': 'application/json',
-        if (bearer) 'Authorization': 'Bearer $_gKey' else 'x-goog-api-key': _gKey,
-      };
-
-  Future<http.Response> _gSend(String path, {Map<String, dynamic>? body, Duration t = const Duration(seconds: 40)}) async {
-    Future<http.Response> go(bool bearer) => body == null
-        ? http.get(Uri.parse('$_gBase$path'), headers: _gHdr(bearer)).timeout(t)
-        : http.post(Uri.parse('$_gBase$path'), headers: _gHdr(bearer), body: jsonEncode(body)).timeout(t);
-    var res = await go(false);
-    // naye AQ. keys ke liye: 401 aaye to Bearer se ek baar aur try
-    if (res.statusCode == 401 && _gKey.startsWith('AQ.')) {
-      final r2 = await go(true);
-      if (r2.statusCode == 200) return r2;
-    }
-    return res;
-  }
-
-  String _friendly(String who, int code, String body) {
-    if (body.contains('ACCESS_TOKEN_TYPE_UNSUPPORTED')) {
-      return '$who ne yeh key accept nahi ki (AQ key is account par abhi kaam nahi kar rahi). AI Studio se nayi key banakar dalein ya Groq key use karein.';
-    }
-    if (code == 401 || code == 403 || body.contains('API key not valid')) {
-      return '$who API key galat hai ya access nahi hai (code $code).';
-    }
-    if (code == 429) return '$who ki limit khatam ho gayi, thodi der baad try karein.';
-    return '$who error $code: ${body.length > 140 ? body.substring(0, 140) : body}';
-  }
-
-  Future<String> _grqModel({bool fresh = false}) async {
-    if (!fresh && _qModel != null) return _qModel!;
-    try {
-      final res = await http
-          .get(Uri.parse('https://api.groq.com/openai/v1/models'), headers: {'Authorization': 'Bearer $_qKey'})
-          .timeout(const Duration(seconds: 15));
-      if (res.statusCode == 200) {
-        final ids = (jsonDecode(res.body)['data'] as List).map((e) => e['id'].toString()).toList();
-        for (final p in ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant']) {
-          if (ids.contains(p)) return _qModel = p;
-        }
-        const bad = ['whisper', 'guard', 'tts', 'playai', 'orpheus', 'safeguard', 'embed'];
-        final ok = ids.where((i) => !bad.any(i.contains)).toList();
-        if (ok.isNotEmpty) return _qModel = ok.first;
-      }
-    } catch (_) {}
-    return _qModel = 'llama-3.1-8b-instant';
-  }
-
-  Future<String> _groq(List<Map<String, String>> msgs, {String? sys}) async {
-    for (int attempt = 0; attempt < 2; attempt++) {
-      final model = await _grqModel(fresh: attempt == 1);
-      final res = await http
-          .post(
-            Uri.parse('https://api.groq.com/openai/v1/chat/completions'),
-            headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer $_qKey'},
-            body: jsonEncode({
-              'model': model,
-              'temperature': 0.4,
-              'messages': [
-                {'role': 'system', 'content': sys ?? _sys},
-                ...msgs,
-              ],
-            }),
-          )
-          .timeout(const Duration(seconds: 40));
-      if (res.statusCode == 200) {
-        return jsonDecode(res.body)['choices'][0]['message']['content'].toString().trim();
-      }
-      if (attempt == 0 &&
-          (res.statusCode == 404 || res.body.contains('model_not_found') || res.body.contains('decommissioned'))) {
-        continue;
-      }
-      throw AiException(_friendly('Groq', res.statusCode, res.body));
-    }
-    throw AiException('Groq: koi chalne wala model nahi mila.');
-  }
-
-  Future<String> _gemModel({bool fresh = false}) async {
-    if (!fresh && _gModel != null) return _gModel!;
-    try {
-      final res = await _gSend('models?pageSize=200', t: const Duration(seconds: 15));
-      if (res.statusCode == 200) {
-        final models = (jsonDecode(res.body)['models'] as List)
-            .where((m) => (m['supportedGenerationMethods'] as List?)?.contains('generateContent') ?? false)
-            .map((m) => m['name'].toString().replaceFirst('models/', ''))
-            .toList();
-        for (final f in _gFallback) {
-          if (models.contains(f)) return _gModel = f;
-        }
-        const bad = ['image', 'tts', 'embed', 'live', 'audio', 'exp', 'thinking', 'lite', 'preview', 'robotics', 'computer', '8b'];
-        final flash = models.where((n) => n.startsWith('gemini') && n.contains('flash') && !bad.any(n.contains)).toList()
-          ..sort((a, b) => b.compareTo(a));
-        if (flash.isNotEmpty) return _gModel = flash.first;
-      }
-    } catch (_) {}
-    return _gModel = _gFallback.first;
-  }
-
-  Future<String> _gemini(List<Map<String, String>> msgs, {String? sys, bool json = true}) async {
-    final body = {
-      'systemInstruction': {'parts': [{'text': sys ?? _sys}]},
-      'contents': msgs
-          .map((m) => {
-                'role': m['role'] == 'assistant' ? 'model' : 'user',
-                'parts': [{'text': m['content']}]
-              })
-          .toList(),
-      'generationConfig': {'temperature': 0.4, if (json) 'responseMimeType': 'application/json'},
-    };
-    final cands = <String>[await _gemModel(), ..._gFallback].toSet().toList();
-    http.Response? last;
-    for (final model in cands) {
-      final res = await _gSend('models/$model:generateContent', body: body);
-      if (res.statusCode == 200) {
-        final parts = jsonDecode(res.body)['candidates']?[0]?['content']?['parts'] as List?;
-        final t = parts?.map((p) => p['text'] ?? '').join().toString().trim() ?? '';
-        if (t.isEmpty) throw AiException('Gemini ne khaali jawab diya, dobara poochiye.');
-        _gModel = model;
-        return t;
-      }
-      last = res;
-      final retry = res.statusCode == 404 ||
-          res.body.contains('ACCESS_TOKEN_TYPE_UNSUPPORTED') ||
-          res.body.contains('no longer available') ||
-          res.body.contains('not found');
-      if (!retry) break;
-    }
-    throw AiException(_friendly('Gemini', last?.statusCode ?? 0, last?.body ?? ''));
-  }
-
-  Future<void> _test() async {
-    setState(() {
-      _busy = true;
-      _status = 'Keys test ho rahi hain...';
-    });
-    final out = <String>[];
-    const ping = [
-      {'role': 'user', 'content': 'Say OK'}
-    ];
-    if (_gKey.isNotEmpty) {
-      try {
-        await _gemini(ping, sys: 'Reply OK', json: false);
-        out.add('Gemini theek chal raha hai');
-      } on AiException catch (e) {
-        out.add(e.message);
-      } catch (_) {
-        out.add('Gemini network error');
-      }
-    }
-    if (_qKey.isNotEmpty) {
-      try {
-        await _groq(ping, sys: 'Reply OK');
-        out.add('Groq theek chal raha hai');
-      } on AiException catch (e) {
-        out.add(e.message);
-      } catch (_) {
-        out.add('Groq network error');
-      }
-    }
-    if (out.isEmpty) out.add('Koi key save nahi hai');
-    if (mounted) setState(() => _busy = false);
-    _say("${out.join('. ')}, $_user.");
-  }
-
-  // ------------------------------------------------------------ dialogs
-  Future<String?> _prompt(String title, String hint, {String initial = ''}) {
-    final c = TextEditingController(text: initial);
-    return showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF121216),
-        title: Text(title),
-        content: TextField(controller: c, autofocus: true, decoration: InputDecoration(hintText: hint)),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, c.text.trim()),
-              child: Text('OK', style: TextStyle(color: _accent))),
-        ],
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      navigatorKey: navKey,
+      title: 'JARVIS Assistant',
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData(
+        brightness: Brightness.dark,
+        scaffoldBackgroundColor: kBlack,
+        colorScheme: const ColorScheme.dark(
+          primary: kAmber,
+          secondary: kOrange,
+          surface: kPanel,
+        ),
+        useMaterial3: true,
       ),
+      home: const HomeScreen(),
     );
   }
+}
 
-  Future<void> _setKey(bool gem) async {
-    final raw = await _prompt(gem ? 'Gemini API Key (AIza... ya AQ.)' : 'Groq API Key', gem ? 'AQ.xxxx ya AIza...' : 'gsk_...');
-    if (raw == null) return;
-    final v = _clean(raw);
-    if (v.isNotEmpty && v.length < 20) {
-      _say('Key bahut chhoti lag rahi hai, poori key paste karein, $_user.');
-      return;
-    }
-    await _put(gem ? 'gkey' : 'qkey', v);
-    setState(() {
-      if (gem) {
-        _gKey = v;
-        _gModel = null;
-      } else {
-        _qKey = v;
-        _qModel = null;
-      }
-    });
-    _test();
-  }
+// ─────────────────────────────────────────────────────────────
+// Home screen
+// ─────────────────────────────────────────────────────────────
+class HomeScreen extends StatelessWidget {
+  const HomeScreen({super.key});
 
-  Future<void> _pickTheme() async {
-    final t = await showDialog<String>(
-      context: context,
-      builder: (ctx) => SimpleDialog(
-        backgroundColor: const Color(0xFF121216),
-        title: const Text('Choose a theme'),
-        children: [
-          for (final e in _themes.entries)
-            SimpleDialogOption(
-              onPressed: () => Navigator.pop(ctx, e.key),
-              child: Row(children: [
-                CircleAvatar(radius: 9, backgroundColor: e.value),
-                const SizedBox(width: 12),
-                Text(e.key),
-              ]),
-            ),
-        ],
-      ),
-    );
-    if (t == null) return;
-    await _put('theme', t);
-    setState(() => _themeName = t);
-  }
+  @override
+  Widget build(BuildContext context) {
+    final c = context.watch<AssistantController>();
 
-  Future<void> _pickVoice() async {
-    final t = await showDialog<String>(
-      context: context,
-      builder: (ctx) => SimpleDialog(
-        backgroundColor: const Color(0xFF121216),
-        title: const Text('Awaaz chuno'),
-        children: [
-          for (final e in _voices.keys)
-            SimpleDialogOption(
-              onPressed: () => Navigator.pop(ctx, e),
-              child: Text(e, style: TextStyle(color: e == _voice ? _accent : Colors.white)),
-            ),
-        ],
-      ),
-    );
-    if (t == null) return;
-    await _put('voice', t);
-    setState(() => _voice = t);
-    _say('Namaste $_user, ab main aise bolungi.');
-  }
-
-  Future<void> _pickPersona() async {
-    final t = await showDialog<String>(
-      context: context,
-      builder: (ctx) => SimpleDialog(
-        backgroundColor: const Color(0xFF121216),
-        title: const Text('Persona chuno'),
-        children: [
-          for (final e in _personas.keys)
-            SimpleDialogOption(
-              onPressed: () => Navigator.pop(ctx, e),
-              child: Text(e, style: TextStyle(color: e == _persona ? _accent : Colors.white)),
-            ),
-        ],
-      ),
-    );
-    if (t == null) return;
-    await _put('persona', t);
-    setState(() => _persona = t);
-  }
-
-  Future<void> _pickWall() async {
-    final x = await ImagePicker().pickImage(source: ImageSource.gallery);
-    if (x == null) return;
-    final dir = await getApplicationDocumentsDirectory();
-    final f = await File(x.path).copy('${dir.path}/wall_${DateTime.now().millisecondsSinceEpoch}.jpg');
-    await _put('wall', f.path);
-    setState(() => _wall = f.path);
-  }
-
-  void _sendTyped() {
-    final t = _input.text.trim();
-    _input.clear();
-    FocusScope.of(context).unfocus();
-    _process(t);
-  }
-
-  // ---------------------------------------------------------------- UI
-  Widget _glass({required Widget child, VoidCallback? onTap, double r = 16, EdgeInsets pad = const EdgeInsets.all(14)}) =>
-      Padding(
-        padding: const EdgeInsets.only(bottom: 10),
-        child: GestureDetector(
-          onTap: onTap,
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(r),
-            child: BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-              child: Container(
-                width: double.infinity,
-                padding: pad,
-                decoration: BoxDecoration(
-                  color: Colors.black.withOpacity(0.5),
-                  borderRadius: BorderRadius.circular(r),
-                  border: Border.all(color: _accent.withOpacity(0.25)),
+    return Scaffold(
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: RadialGradient(
+            center: Alignment(0, -0.25),
+            radius: 1.15,
+            colors: [Color(0xFF2B1300), kBlack],
+          ),
+        ),
+        child: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
+          child: Column(
+            children: [
+              _Header(
+                onSettings: () => _openSettings(context),
+                onHistory: () => _openHistory(context),
+              ),
+              const SizedBox(height: 16),
+              _StandbyCard(controller: c),
+              Expanded(
+                child: LayoutBuilder(
+                  builder: (context, box) {
+                    final size =
+                        math.min(box.maxWidth, box.maxHeight - 40) * 0.92;
+                    return Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        SizedBox(
+                          width: math.max(size, 60),
+                          height: math.max(size, 60),
+                          child: ArcReactor(
+                            phase: c.phase,
+                            onTap: c.onReactorTap,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          _hint(c.phase),
+                          style: TextStyle(
+                            color: kAmber.withValues(alpha: 0.85),
+                            fontSize: 14,
+                            letterSpacing: 1.2,
+                          ),
+                        ),
+                      ],
+                    );
+                  },
                 ),
-                child: child,
+              ),
+              _StatusPanel(controller: c),
+              const SizedBox(height: 10),
+              const _CommandBar(),
+            ],
+          ),
+        ),
+      )),
+    );
+  }
+
+  static String _hint(Phase p) {
+    switch (p) {
+      case Phase.idle:
+        return 'Tap arc reactor to give command';
+      case Phase.listening:
+        return 'Listening… tap to finish';
+      case Phase.thinking:
+        return 'Thinking…';
+      case Phase.speaking:
+        return 'Speaking… tap to stop';
+    }
+  }
+
+  void _openHistory(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: kPanel,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.7,
+        maxChildSize: 0.95,
+        builder: (context, scroll) => Consumer<AssistantController>(
+          builder: (context, c, _) {
+            if (c.chat.isEmpty) {
+              return const Center(
+                child: Text('No conversation yet.',
+                    style: TextStyle(color: Colors.white54)),
+              );
+            }
+            return ListView.builder(
+              controller: scroll,
+              padding: const EdgeInsets.all(16),
+              itemCount: c.chat.length,
+              itemBuilder: (_, i) {
+                final m = c.chat[i];
+                return Align(
+                  alignment:
+                      m.fromUser ? Alignment.centerRight : Alignment.centerLeft,
+                  child: Container(
+                    margin: const EdgeInsets.symmetric(vertical: 5),
+                    padding: const EdgeInsets.all(12),
+                    constraints: const BoxConstraints(maxWidth: 300),
+                    decoration: BoxDecoration(
+                      color: m.fromUser
+                          ? kOrange.withValues(alpha: 0.25)
+                          : Colors.white10,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(
+                          color: (m.fromUser ? kOrange : kAmber)
+                              .withValues(alpha: 0.5)),
+                    ),
+                    child: Text(m.text,
+                        style: const TextStyle(color: Colors.white, height: 1.35)),
+                  ),
+                );
+              },
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  void _openSettings(BuildContext context) {
+    showDialog<void>(
+      context: context,
+      builder: (_) => ChangeNotifierProvider.value(
+        value: context.read<AssistantController>(),
+        child: const _SettingsDialog(),
+      ),
+    );
+  }
+}
+
+class _Header extends StatelessWidget {
+  const _Header({required this.onSettings, required this.onHistory});
+  final VoidCallback onSettings;
+  final VoidCallback onHistory;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        const Expanded(
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              'JARVIS ASSISTANT (Boss)',
+              style: TextStyle(
+                color: kGold,
+                fontSize: 22,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 2,
+                shadows: [Shadow(color: kOrange, blurRadius: 14)],
               ),
             ),
           ),
         ),
-      );
-
-  Widget _tile(IconData i, String t, String s, VoidCallback f) => _glass(
-        onTap: f,
-        child: Row(children: [
-          Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(shape: BoxShape.circle, color: _accent.withOpacity(0.18)),
-              child: Icon(i, color: _accent, size: 20)),
-          const SizedBox(width: 12),
-          Expanded(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(t, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
-            const SizedBox(height: 2),
-            Text(s, style: const TextStyle(color: Colors.white54, fontSize: 12)),
-          ])),
-          const Icon(Icons.chevron_right, color: Colors.white38),
-        ]),
-      );
-
-  Widget _section(String t) => Padding(
-      padding: const EdgeInsets.fromLTRB(4, 14, 0, 8),
-      child: Text(t, style: TextStyle(color: _accent, fontSize: 12, fontWeight: FontWeight.w700, letterSpacing: 1.3)));
-
-  Widget _head(String t) => Padding(
-      padding: const EdgeInsets.fromLTRB(20, 14, 20, 6),
-      child: Text(t, textAlign: TextAlign.center, style: TextStyle(color: _accent, fontWeight: FontWeight.w800, letterSpacing: 2)));
-
-  Widget _bg() => Stack(fit: StackFit.expand, children: [
-        if (_wall.isNotEmpty && File(_wall).existsSync())
-          Image.file(File(_wall), fit: BoxFit.cover)
-        else
-          Container(
-              decoration: BoxDecoration(
-                  gradient: RadialGradient(
-                      center: const Alignment(0, -0.3), radius: 1.2, colors: [_accent.withOpacity(0.28), Colors.black]))),
-        Container(
-            decoration: BoxDecoration(
-                gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [Colors.black.withOpacity(0.25), Colors.black.withOpacity(0.82)]))),
-      ]);
-
-  Widget _home() => ListView(padding: const EdgeInsets.fromLTRB(20, 14, 20, 20), children: [
-        Row(children: [
-          Expanded(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('Hello, $_user', style: const TextStyle(fontSize: 32, fontWeight: FontWeight.w800)),
-            const Text('How can I assist you today?', style: TextStyle(color: Colors.white54)),
-          ])),
-          const Icon(Icons.notifications_none, color: Colors.white70),
-        ]),
-        const SizedBox(height: 10),
-        Center(
-          child: GestureDetector(
-            onTap: _mic,
-            child: SizedBox(
-              width: 260,
-              height: 260,
-              child: Stack(alignment: Alignment.center, children: [
-                AnimatedBuilder(
-                    animation: _anim,
-                    builder: (_, __) => CustomPaint(
-                        size: const Size(260, 260), painter: OrbPainter(_anim.value, _accent, _listening || _busy))),
-                Icon(_listening ? Icons.graphic_eq : Icons.mic, color: Colors.white, size: 38),
-              ]),
-            ),
-          ),
+        IconButton(
+          tooltip: 'Chat history',
+          onPressed: onHistory,
+          icon: const Icon(Icons.forum_outlined, color: kAmber, size: 24),
         ),
-        Center(
-            child: Text(_busy ? 'Soch raha hoon...' : (_status.isEmpty ? 'Tap the orb to speak' : _status),
-                textAlign: TextAlign.center, maxLines: 6, overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: Colors.white70, height: 1.4))),
-        if (_action.isNotEmpty)
-          Center(child: Text(_action, style: TextStyle(color: _accent, fontSize: 11))),
-        const SizedBox(height: 14),
-        _glass(
-          r: 30,
-          pad: const EdgeInsets.symmetric(horizontal: 18, vertical: 2),
-          child: Row(children: [
-            Expanded(
-                child: TextField(
-                    controller: _input,
-                    onSubmitted: (_) => _sendTyped(),
-                    decoration: const InputDecoration(hintText: 'Ask MAX anything...', border: InputBorder.none))),
-            IconButton(icon: Icon(Icons.send, color: _accent), onPressed: _sendTyped),
-          ]),
+        IconButton(
+          tooltip: 'Settings',
+          onPressed: onSettings,
+          icon: const Icon(Icons.settings, color: kAmber, size: 26),
         ),
-        Row(children: [
-          Expanded(
-              child: _glass(
-                  onTap: _toggleStandby,
-                  child: Column(children: [
-                    Icon(Icons.graphic_eq, color: _accent),
-                    const SizedBox(height: 6),
-                    Text(_standby ? 'Listening...' : 'Voice Mode', style: const TextStyle(fontWeight: FontWeight.w600)),
-                  ]))),
-          const SizedBox(width: 10),
-          Expanded(
-              child: _glass(
-                  onTap: () => _tool('open_app', {'name': 'camera'}),
-                  child: Column(children: [
-                    Icon(Icons.camera_alt, color: _accent),
-                    const SizedBox(height: 6),
-                    const Text('Camera', style: TextStyle(fontWeight: FontWeight.w600)),
-                  ]))),
-        ]),
-        _tile(Icons.rocket_launch, 'Mission Mode', 'Give MAX a goal to run autonomously', () async {
-          final g = await _prompt('Mission Mode', 'Goal likho...');
-          if (g != null && g.isNotEmpty) _process(g, mission: true);
-        }),
-        _tile(Icons.school, 'English Teacher AI', _teacher ? 'ON - practice chal rahi hai' : 'Learn English, speak, improve', () {
-          setState(() => _teacher = !_teacher);
-          _say(_teacher ? 'English teacher mode on. Let us practice. How was your day?' : 'English teacher mode off.');
-        }),
-        _section('QUICK DIRECTIVES'),
-        Row(children: [
-          Expanded(
-              child: _glass(
-                  onTap: () => _process('Deep research: mere area ka aaj ka mausam aur top khabrein web search karke batao'),
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Icon(Icons.travel_explore, color: _accent),
-                    const SizedBox(height: 6),
-                    const Text('Deep Research', style: TextStyle(fontWeight: FontWeight.w700)),
-                    const Text('Analyze local weather', style: TextStyle(color: Colors.white54, fontSize: 11)),
-                  ]))),
-          const SizedBox(width: 10),
-          Expanded(
-              child: _glass(
-                  onTap: () async {
-                    final q = await _prompt('Image Search', 'Kya dhundhna hai?');
-                    if (q != null && q.isNotEmpty) _open('https://www.google.com/search?tbm=isch&q=${Uri.encodeComponent(q)}');
-                  },
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Icon(Icons.image_search, color: _accent),
-                    const SizedBox(height: 6),
-                    const Text('Image Search', style: TextStyle(fontWeight: FontWeight.w700)),
-                    const Text('Search aesthetic spaces', style: TextStyle(color: Colors.white54, fontSize: 11)),
-                  ]))),
-        ]),
-        _glass(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('NEURAL INSIGHT', style: TextStyle(color: _accent, fontSize: 11, fontWeight: FontWeight.w700)),
-          const SizedBox(height: 6),
-          Text(_quotes[DateTime.now().day % _quotes.length], style: const TextStyle(fontSize: 15)),
-        ])),
-      ]);
-
-  Widget _chatPage() => Column(children: [
-        _head('TODAY'),
-        Expanded(
-          child: _chat.isEmpty
-              ? const Center(child: Text('Abhi koi baat nahi hui.', style: TextStyle(color: Colors.white54)))
-              : ListView.builder(
-                  padding: const EdgeInsets.all(16),
-                  itemCount: _chat.length,
-                  itemBuilder: (_, i) {
-                    final m = _chat[i];
-                    return _glass(
-                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Row(children: [
-                        Text(m['role'] == 'user' ? 'You said' : 'assistant',
-                            style: TextStyle(color: _accent, fontSize: 11, fontWeight: FontWeight.w700)),
-                        const Spacer(),
-                        GestureDetector(
-                            onTap: () {
-                              setState(() => _chat.removeAt(i));
-                              _saveChat();
-                            },
-                            child: const Icon(Icons.delete_outline, size: 18, color: Colors.white38)),
-                      ]),
-                      const SizedBox(height: 6),
-                      Text(m['text'] ?? ''),
-                    ]));
-                  }),
-        ),
-      ]);
-
-  Widget _quickPage() {
-    final items = <List<dynamic>>[
-      [Icons.flashlight_on, 'Flashlight', 'flashlight on karo'],
-      [Icons.wb_sunny, 'Weather', 'aaj ka weather batao'],
-      [Icons.chat, 'WhatsApp', 'whatsapp kholo'],
-      [Icons.play_circle, 'YouTube', 'youtube kholo'],
-      [Icons.map, 'Maps', 'maps kholo'],
-      [Icons.camera_alt, 'Camera', 'camera kholo'],
-      [Icons.alarm, 'Alarm', 'subah 6 baje ka alarm lagao'],
-      [Icons.shopping_bag, 'Shopping', 'flipkart kholo'],
-    ];
-    final w = (MediaQuery.of(context).size.width - 50) / 2;
-    return ListView(padding: const EdgeInsets.all(20), children: [
-      _head('QUICK ACTIONS'),
-      Wrap(spacing: 10, children: [
-        for (final e in items)
-          SizedBox(
-              width: w,
-              child: _glass(
-                  onTap: () {
-                    setState(() => _tab = 0);
-                    _process(e[2] as String);
-                  },
-                  child: Column(children: [
-                    Icon(e[0] as IconData, color: _accent, size: 28),
-                    const SizedBox(height: 8),
-                    Text(e[1] as String, style: const TextStyle(fontWeight: FontWeight.w600)),
-                  ]))),
-      ]),
-    ]);
+      ],
+    );
   }
+}
 
-  Widget _settingsPage() => ListView(padding: const EdgeInsets.fromLTRB(20, 10, 20, 20), children: [
-        _head('SETTINGS'),
-        _section('PROFILE & ACCOUNT'),
-        _tile(Icons.person, 'User Profile', 'Naam: $_user', () async {
-          final v = await _prompt('Aapka naam', 'Naam likho', initial: _user);
-          if (v != null && v.isNotEmpty) {
-            await _put('user', v);
-            setState(() => _user = v);
-          }
-        }),
-        _section('VOICE & AI MODELS'),
-        _tile(Icons.auto_awesome, 'Gemini API Key', _gKey.isEmpty ? 'Not set (AIza ya AQ. key daalo)' : 'Saved: ${_mask(_gKey)}', () => _setKey(true)),
-        _tile(Icons.bolt, 'Groq API Key', _qKey.isEmpty ? 'Not set' : 'Saved: ${_mask(_qKey)}', () => _setKey(false)),
-        _tile(Icons.swap_horiz, 'AI Provider', 'Current: $_provider (tap to change)', () async {
-          final n = _provider == 'auto' ? 'gemini' : (_provider == 'gemini' ? 'groq' : 'auto');
-          await _put('provider', n);
-          setState(() => _provider = n);
-        }),
-        _tile(Icons.network_check, 'Test Connection', 'Keys aur model check karo', _test),
-        _section('VOICE'),
-        _tile(Icons.multitrack_audio, 'Voice', 'Current: $_voice (tap to change)', _pickVoice),
-        _tile(Icons.graphic_eq, 'Natural Gemini Voice', _natural ? 'ON - insaani awaaz (Gemini key chahiye)' : 'OFF - phone ki robotic awaaz', () async {
-          final v = !_natural;
-          final p = await SharedPreferences.getInstance();
-          await p.setBool('natural', v);
-          setState(() => _natural = v);
-        }),
-        _tile(Icons.forum, 'Conversation Mode', _conv ? 'ON - jawab ke baad khud sunta rahega' : 'OFF - har baar mic dabana padega', () async {
-          final v = !_conv;
-          final p = await SharedPreferences.getInstance();
-          await p.setBool('conv', v);
-          setState(() => _conv = v);
-        }),
-        _tile(Icons.play_circle, 'Voice Test', 'Awaaz sun kar check karo', () async {
-          _ttsErr = '';
-          await _say('Namaste $_user, main $_aname hoon. Aap mujhse kuch bhi pooch sakte hain.');
-          if (_ttsErr.isNotEmpty && mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text('Gemini voice nahi chali ($_ttsErr), phone ki awaaz use hui.')));
-          }
-        }),
-        _tile(Icons.badge, 'Assistant Name', 'Naam: $_aname', () async {
-          final v = await _prompt('Assistant ka naam', 'jaise: Maya', initial: _aname);
-          if (v != null && v.isNotEmpty) {
-            await _put('aname', v);
-            setState(() => _aname = v);
-          }
-        }),
-        _tile(Icons.theater_comedy, 'Persona', 'Current: $_persona', _pickPersona),
-        _section('WAKE WORD'),
-        _glass(
-            child: Row(children: [
-          Expanded(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            const Text('Wake Word', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
-            Text("Say 'Hey $_wake'", style: const TextStyle(color: Colors.white54, fontSize: 12)),
-          ])),
-          Switch(value: _standby, activeColor: _accent, onChanged: (_) => _toggleStandby()),
-        ])),
-        _tile(Icons.record_voice_over, 'Custom Wake Word', 'Current: $_wake', () async {
-          final v = await _prompt('Wake word (sirf naam)', 'jaise: power');
-          if (v != null && v.isNotEmpty) {
-            await _put('wake', v.toLowerCase());
-            setState(() => _wake = v.toLowerCase());
-          }
-        }),
-        _section('APPEARANCE'),
-        _tile(Icons.palette, 'Orb Customization', 'Theme: $_themeName', _pickTheme),
-        _tile(Icons.wallpaper, 'Wallpaper', 'Gallery se apni image chuno', _pickWall),
-        _tile(Icons.hide_image, 'Remove Wallpaper', 'Default dark background', () async {
-          await _put('wall', '');
-          setState(() => _wall = '');
-        }),
-        _section('SECURITY & PRIVACY'),
-        _tile(Icons.shield, 'Permissions', 'Manage all required permissions', () => openAppSettings()),
-        _tile(Icons.delete_sweep, 'Clear Chat & Memory', 'Saari purani baatein hatao', () async {
-          setState(() {
-            _chat.clear();
-            _memory.clear();
-          });
-          await _saveChat();
-          await _putList('memory', _memory);
-        }),
-      ]);
-
-  Widget _navBtn(IconData i, int t) => IconButton(
-      icon: Icon(i, color: _tab == t ? _accent : Colors.white38, size: 26), onPressed: () => setState(() => _tab = t));
-
-  Widget _nav() => SizedBox(
-        height: 92,
-        child: Stack(clipBehavior: Clip.none, children: [
-          Positioned(
-              left: 0,
-              right: 0,
-              bottom: 0,
-              height: 64,
-              child: Container(
-                  decoration: BoxDecoration(
-                      color: Colors.black.withOpacity(0.88),
-                      border: Border(top: BorderSide(color: _accent.withOpacity(0.25)))),
-                  child: Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [
-                    _navBtn(Icons.home_rounded, 0),
-                    _navBtn(Icons.chat_bubble_outline, 1),
-                    const SizedBox(width: 80),
-                    _navBtn(Icons.bolt, 2),
-                    _navBtn(Icons.settings, 3),
-                  ]))),
-          Positioned(
-              left: 0,
-              right: 0,
-              bottom: 16,
-              child: Center(
-                  child: GestureDetector(
-                      onTap: _mic,
-                      child: Container(
-                          width: 68,
-                          height: 68,
-                          decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: Colors.black,
-                              border: Border.all(color: _accent, width: 2),
-                              boxShadow: [BoxShadow(color: _accent.withOpacity(0.6), blurRadius: 18)]),
-                          child: Center(
-                              child: Container(
-                                  width: 40,
-                                  height: 40,
-                                  decoration: BoxDecoration(
-                                      shape: BoxShape.circle,
-                                      gradient: RadialGradient(colors: [Colors.orangeAccent, _accent])))))))),
-        ]),
-      );
+class _StandbyCard extends StatelessWidget {
+  const _StandbyCard({required this.controller});
+  final AssistantController controller;
 
   @override
   Widget build(BuildContext context) {
-    final pages = [_home, _chatPage, _quickPage, _settingsPage];
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: Stack(children: [
-        Positioned.fill(child: _bg()),
-        SafeArea(
-            child: Column(children: [
-          Expanded(child: pages[_tab]()),
-          _nav(),
-        ])),
-        Positioned.fill(
-            child: IgnorePointer(
-                child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 250),
-                    decoration: BoxDecoration(
-                        border: Border.all(color: _listening ? _accent : Colors.transparent, width: 3))))),
-      ]),
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: kPanel,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: kAmber.withValues(alpha: 0.45)),
+        boxShadow: [
+          BoxShadow(color: kOrange.withValues(alpha: 0.18), blurRadius: 18),
+        ],
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.power_settings_new, color: kAmber, size: 20),
+              const SizedBox(width: 10),
+              const Expanded(
+                child: Text(
+                  "Standby Wake Word ('Hello Power')",
+                  style: TextStyle(color: Colors.white, fontSize: 14),
+                ),
+              ),
+              Switch(
+                value: controller.standby,
+                onChanged: controller.setStandby,
+                thumbColor: WidgetStateProperty.resolveWith(
+                  (s) => s.contains(WidgetState.selected) ? kGold : Colors.grey,
+                ),
+                trackColor: WidgetStateProperty.resolveWith(
+                  (s) => s.contains(WidgetState.selected)
+                      ? kOrange.withValues(alpha: 0.6)
+                      : Colors.white12,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: kBlack,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: kOrange.withValues(alpha: 0.5)),
+            ),
+            child: Text(
+              'Command: ${controller.command}',
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: kGold, fontSize: 14),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _StatusPanel extends StatelessWidget {
+  const _StatusPanel({required this.controller});
+  final AssistantController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final err = controller.isError;
+    final color = err ? kError : kAmber;
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 250),
+      width: double.infinity,
+      constraints: const BoxConstraints(maxHeight: 110),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: kPanel,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: color.withValues(alpha: 0.6)),
+      ),
+      child: SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(
+                  err ? Icons.error_outline : Icons.graphic_eq,
+                  color: color,
+                  size: 20,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    controller.status,
+                    style: TextStyle(color: color, fontSize: 14, height: 1.3),
+                  ),
+                ),
+              ],
+            ),
+            if (controller.reply.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              Text(
+                controller.reply,
+                style: const TextStyle(
+                    color: Colors.white, fontSize: 15, height: 1.35),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Settings dialog
+// ─────────────────────────────────────────────────────────────
+class _SettingsDialog extends StatefulWidget {
+  const _SettingsDialog();
+
+  @override
+  State<_SettingsDialog> createState() => _SettingsDialogState();
+}
+
+class _SettingsDialogState extends State<_SettingsDialog> {
+  late final TextEditingController _text;
+  bool _obscure = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _text = TextEditingController(
+        text: context.read<AssistantController>().apiKey);
+  }
+
+  @override
+  void dispose() {
+    _text.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: kPanel,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: const BorderSide(color: kAmber),
+      ),
+      title: const Text('Settings', style: TextStyle(color: kGold)),
+      content: SingleChildScrollView(
+          child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const _NameAndVoice(),
+          const SizedBox(height: 16),
+          const Text(
+            'Gemini API key (create one at aistudio.google.com/app/apikey). '
+            'It is stored only on this device.',
+            style: TextStyle(color: Colors.white70, fontSize: 13),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _text,
+            obscureText: _obscure,
+            autocorrect: false,
+            enableSuggestions: false,
+            style: const TextStyle(color: Colors.white),
+            decoration: InputDecoration(
+              labelText: 'API key',
+              labelStyle: const TextStyle(color: kAmber),
+              enabledBorder: OutlineInputBorder(
+                borderSide: BorderSide(color: kAmber.withValues(alpha: 0.5)),
+              ),
+              focusedBorder: const OutlineInputBorder(
+                borderSide: BorderSide(color: kGold),
+              ),
+              suffixIcon: IconButton(
+                icon: Icon(
+                  _obscure ? Icons.visibility : Icons.visibility_off,
+                  color: kAmber,
+                ),
+                onPressed: () => setState(() => _obscure = !_obscure),
+              ),
+            ),
+          ),
+        ],
+      )),
+      actions: [
+
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel', style: TextStyle(color: Colors.white70)),
+        ),
+        TextButton(
+          onPressed: () async {
+            final navigator = Navigator.of(context);
+            await context.read<AssistantController>().saveApiKey(_text.text);
+            navigator.pop();
+          },
+          child: const Text('Save', style: TextStyle(color: kGold)),
+        ),
+      ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Arc reactor
+// ─────────────────────────────────────────────────────────────
+class ArcReactor extends StatefulWidget {
+  const ArcReactor({super.key, required this.phase, required this.onTap});
+  final Phase phase;
+  final VoidCallback onTap;
+
+  @override
+  State<ArcReactor> createState() => _ArcReactorState();
+}
+
+class _ArcReactorState extends State<ArcReactor>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _anim = AnimationController(
+    vsync: this,
+    duration: const Duration(seconds: 8),
+  )..repeat();
+
+  @override
+  void dispose() {
+    _anim.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final active = widget.phase != Phase.idle;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () {
+        HapticFeedback.mediumImpact();
+        widget.onTap();
+      },
+      child: LayoutBuilder(
+        builder: (context, box) {
+          final side = math.min(box.maxWidth, box.maxHeight);
+          return AnimatedBuilder(
+            animation: _anim,
+            builder: (context, _) {
+              final t = _anim.value;
+              final pulse = (math.sin(t * math.pi * 2 * 8) + 1) / 2;
+              return Stack(
+                alignment: Alignment.center,
+                children: [
+                  CustomPaint(
+                    size: Size.square(side),
+                    painter: _ReactorPainter(
+                      t: t,
+                      pulse: pulse,
+                      intensity: active ? 1.0 : 0.45,
+                    ),
+                  ),
+                  Icon(
+                    Icons.bolt,
+                    size: side * 0.24,
+                    color: Colors.white,
+                    shadows: const [
+                      Shadow(color: kOrange, blurRadius: 24),
+                      Shadow(color: kGold, blurRadius: 8),
+                    ],
+                  ),
+                ],
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _ReactorPainter extends CustomPainter {
+  _ReactorPainter({
+    required this.t,
+    required this.pulse,
+    required this.intensity,
+  });
+
+  final double t;
+  final double pulse;
+  final double intensity;
+
+  static const double _twoPi = math.pi * 2;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final c = size.center(Offset.zero);
+    final r = size.shortestSide / 2;
+
+    // Ambient glow
+    canvas.drawCircle(
+      c,
+      r * 0.88,
+      Paint()
+        ..color = kOrange.withValues(
+            alpha: ((0.10 + 0.18 * pulse) * intensity + 0.05).clamp(0.0, 1.0))
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 40),
+    );
+
+    // Outer ring
+    canvas.drawCircle(
+      c,
+      r * 0.96,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2
+        ..color = kAmber.withValues(alpha: 0.35 + 0.5 * intensity),
+    );
+
+    _arcs(canvas, c, r * 0.84, 12, 0.55, t * _twoPi, 8, kOrange, true);
+    _arcs(canvas, c, r * 0.68, 6, 0.7, -t * _twoPi * 1.5, 5, kGold, true);
+    _arcs(canvas, c, r * 0.55, 24, 0.4, t * _twoPi * 2, 3, kAmber, false);
+
+    // Core
+    final coreRect = Rect.fromCircle(center: c, radius: r * 0.40);
+    canvas.drawCircle(
+      c,
+      r * 0.40,
+      Paint()
+        ..shader = RadialGradient(
+          colors: [
+            kGold.withValues(alpha: 0.95),
+            kOrange.withValues(alpha: 0.55 + 0.3 * pulse * intensity),
+            kOrange.withValues(alpha: 0.0),
+          ],
+          stops: const [0.0, 0.6, 1.0],
+        ).createShader(coreRect),
+    );
+    canvas.drawCircle(
+      c,
+      r * 0.40,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2
+        ..color = kGold.withValues(alpha: 0.8),
+    );
+  }
+
+  void _arcs(Canvas canvas, Offset c, double radius, int count, double fill,
+      double rotation, double width, Color color, bool glow) {
+    final step = _twoPi / count;
+    final rect = Rect.fromCircle(center: c, radius: radius);
+    final base = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = width
+      ..strokeCap = StrokeCap.round
+      ..color = color.withValues(alpha: 0.35 + 0.6 * intensity);
+    final blur = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = width + 4
+      ..strokeCap = StrokeCap.round
+      ..color = color.withValues(alpha: 0.5 * intensity)
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8);
+
+    for (var i = 0; i < count; i++) {
+      final start = rotation + i * step;
+      if (glow) canvas.drawArc(rect, start, step * fill, false, blur);
+      canvas.drawArc(rect, start, step * fill, false, base);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _ReactorPainter old) =>
+      old.t != t || old.pulse != pulse || old.intensity != intensity;
+}
+
+
+// ─────────────────────────────────────────────────────────────
+// Command bar: quick chips + typed commands
+// ─────────────────────────────────────────────────────────────
+class _CommandBar extends StatefulWidget {
+  const _CommandBar();
+  @override
+  State<_CommandBar> createState() => _CommandBarState();
+}
+
+class _CommandBarState extends State<_CommandBar> {
+  final TextEditingController _text = TextEditingController();
+
+  static const List<String> _chips = [
+    'मेरे लिए एक पोर्टफोलियो वेबसाइट बनाओ',
+    'पटना का मैप दिखाओ',
+    'बैटरी कितनी है?',
+    'फ्लैशलाइट ऑन करो',
+    'YouTube पर कोई गाना चलाओ',
+  ];
+
+  @override
+  void dispose() {
+    _text.dispose();
+    super.dispose();
+  }
+
+  void _send(String t) {
+    context.read<AssistantController>().sendText(t);
+    _text.clear();
+    FocusScope.of(context).unfocus();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        SizedBox(
+          height: 36,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            itemCount: _chips.length,
+            separatorBuilder: (_, __) => const SizedBox(width: 8),
+            itemBuilder: (_, i) => ActionChip(
+              label: Text(_chips[i],
+                  style: const TextStyle(color: kGold, fontSize: 12)),
+              backgroundColor: kPanel,
+              side: BorderSide(color: kAmber.withValues(alpha: 0.5)),
+              onPressed: () => _send(_chips[i]),
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Expanded(
+              child: TextField(
+                controller: _text,
+                style: const TextStyle(color: Colors.white),
+                textInputAction: TextInputAction.send,
+                onSubmitted: _send,
+                decoration: InputDecoration(
+                  hintText: 'Type a command…',
+                  hintStyle: const TextStyle(color: Colors.white38),
+                  filled: true,
+                  fillColor: kPanel,
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(24),
+                    borderSide: BorderSide(color: kAmber.withValues(alpha: 0.5)),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(24),
+                    borderSide: BorderSide(color: kAmber.withValues(alpha: 0.5)),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(24),
+                    borderSide: const BorderSide(color: kGold),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            IconButton.filled(
+              style: IconButton.styleFrom(backgroundColor: kOrange),
+              onPressed: () => _send(_text.text),
+              icon: const Icon(Icons.send_rounded, color: Colors.white),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Assistant name + voice controls (inside Settings)
+// ─────────────────────────────────────────────────────────────
+class _NameAndVoice extends StatefulWidget {
+  const _NameAndVoice();
+  @override
+  State<_NameAndVoice> createState() => _NameAndVoiceState();
+}
+
+class _NameAndVoiceState extends State<_NameAndVoice> {
+  late final TextEditingController _name;
+  late double _pitch;
+  late double _rate;
+  String? _voice;
+  List<Map<String, String>> _voices = [];
+
+  @override
+  void initState() {
+    super.initState();
+    final c = context.read<AssistantController>();
+    _name = TextEditingController(text: c.assistantName);
+    _pitch = c.voicePitch;
+    _rate = c.voiceRate;
+    _voice = c.voiceName;
+    c.listVoices().then((v) {
+      if (mounted) setState(() => _voices = v);
+    });
+  }
+
+  @override
+  void dispose() {
+    _name.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.read<AssistantController>();
+    final items = _voices
+        .map((v) => DropdownMenuItem<String>(
+              value: '${v['name']}|${v['locale']}',
+              child: Text('${v['name']} (${v['locale']})',
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: Colors.white, fontSize: 13)),
+            ))
+        .toList();
+    final selected = items.any((i) => i.value == _voice) ? _voice : null;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        TextField(
+          controller: _name,
+          style: const TextStyle(color: Colors.white),
+          decoration: const InputDecoration(
+            labelText: 'Assistant name',
+            labelStyle: TextStyle(color: kAmber),
+          ),
+          onChanged: (v) => c.saveVoice(name: v),
+        ),
+        const SizedBox(height: 10),
+        Text('Voice pitch  ${_pitch.toStringAsFixed(2)}',
+            style: const TextStyle(color: Colors.white70, fontSize: 13)),
+        Slider(
+          value: _pitch,
+          min: 0.8,
+          max: 1.8,
+          activeColor: kAmber,
+          onChanged: (v) => setState(() => _pitch = v),
+          onChangeEnd: (v) => c.saveVoice(pitch: v),
+        ),
+        Text('Speech speed  ${_rate.toStringAsFixed(2)}',
+            style: const TextStyle(color: Colors.white70, fontSize: 13)),
+        Slider(
+          value: _rate,
+          min: 0.3,
+          max: 0.8,
+          activeColor: kAmber,
+          onChanged: (v) => setState(() => _rate = v),
+          onChangeEnd: (v) => c.saveVoice(rate: v),
+        ),
+        if (items.isNotEmpty)
+          DropdownButton<String>(
+            isExpanded: true,
+            dropdownColor: kPanel,
+            value: selected,
+            hint: const Text('Choose a voice',
+                style: TextStyle(color: Colors.white54)),
+            items: items,
+            onChanged: (v) {
+              setState(() => _voice = v);
+              c.saveVoice(voice: v);
+            },
+          ),
+        TextButton.icon(
+          onPressed: c.previewVoice,
+          icon: const Icon(Icons.volume_up, color: kGold),
+          label: const Text('Preview voice', style: TextStyle(color: kGold)),
+        ),
+      ],
     );
   }
 }
