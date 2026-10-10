@@ -22,12 +22,14 @@ class GeminiService {
   final List<Map<String, dynamic>> _history = [];
 
   String assistantName = 'Riya';
+  bool devanagari = true;
+  void Function(String)? onAction;
 
   String get _systemPrompt =>
       'You are $assistantName, the Boss\'s personal AI companion living on his Android phone. '
       'Personality: warm, caring, playful and a little teasing, like a loving girlfriend who is also extremely capable. '
       'Always use feminine first-person Hindi grammar (main kar rahi hu). Call the user Boss, sometimes jaan. Stay affectionate but respectful, never explicit. '
-      'Language: if the user speaks Hindi or Hinglish, reply in Hindi written in Devanagari script so the voice reads it naturally; if English, reply in English. '
+      '${devanagari ? "Language: if the user speaks Hindi or Hinglish, reply in Hindi written in Devanagari script so the voice reads it naturally; if English, reply in English. " : "Language: if the user speaks Hindi, reply in Hinglish using Roman letters; if English, reply in English. "}'
       'Style: at most three short sentences, plain text, no markdown, no emojis. '
       'Actions: for any phone action call the matching tool. '
       'When asked to build or design a website, landing page or portfolio call create_website with a detailed brief. '
@@ -144,6 +146,8 @@ class GeminiService {
           final result = name == 'create_website'
               ? await _buildWebsite(apiKey, args)
               : await PhoneTools.run(name, args);
+          onAction?.call(
+              '$name → ${result['ok'] == true ? (result['message'] ?? result['battery_percent'] ?? 'ok') : (result['error'] ?? 'failed')}');
           responses.add({
             'functionResponse': {
               'name': name,
