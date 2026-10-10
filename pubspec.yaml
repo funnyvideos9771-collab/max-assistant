@@ -19,6 +19,7 @@ dependencies:
   battery_plus: ^6.2.0
   torch_light: ^1.1.0
   webview_flutter: ^4.9.0
+  audioplayers: ^6.1.0
 
 dev_dependencies:
   flutter_test:
