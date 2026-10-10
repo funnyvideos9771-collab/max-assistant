@@ -1,8 +1,13 @@
+import 'dart:async';
+import 'dart:convert';
 import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter_tts/flutter_tts.dart';
+import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:speech_to_text/speech_recognition_error.dart';
@@ -40,6 +45,7 @@ class AssistantController extends ChangeNotifier {
     _init();
   }
 
+  static const String _defaultVoiceId = '21m00Tcm4TlvDq8ikWAM';
   static const String _prefKey = 'gemini_api_key';
   static const String _prefStandby = 'standby_enabled';
   static const String _envKey = String.fromEnvironment('GEMINI_API_KEY');
@@ -60,6 +66,15 @@ class AssistantController extends ChangeNotifier {
   double voicePitch = 1.3;
   double voiceRate = 0.48;
   String? voiceName;
+  String elevenKey = '';
+  String elevenVoiceId = _defaultVoiceId;
+  String listenLang = 'hi_IN';
+  String actionLog = '';
+  String voiceNote = '';
+  bool _hiTts = false;
+  final AudioPlayer _player = AudioPlayer();
+  final Map<String, Uint8List> _audioCache = {};
+  String? get _localeId => listenLang.isEmpty ? null : listenLang;
   final List<ChatMessage> chat = [];
 
   bool _sttReady = false;
@@ -87,6 +102,10 @@ class AssistantController extends ChangeNotifier {
   }
 
   Future<void> _init() async {
+    _gemini.onAction = (s) {
+      actionLog = s;
+      _notify();
+    };
     try {
       final prefs = await SharedPreferences.getInstance();
       apiKey = prefs.getString(_prefKey) ?? _envKey;
@@ -95,6 +114,9 @@ class AssistantController extends ChangeNotifier {
       voicePitch = prefs.getDouble('voice_pitch') ?? 1.3;
       voiceRate = prefs.getDouble('voice_rate') ?? 0.48;
       voiceName = prefs.getString('voice_name');
+      elevenKey = prefs.getString('eleven_key') ?? const String.fromEnvironment('ELEVEN_API_KEY');
+      elevenVoiceId = prefs.getString('eleven_voice') ?? _defaultVoiceId;
+      listenLang = prefs.getString('listen_lang') ?? 'hi_IN';
       _gemini.assistantName = assistantName;
     } catch (_) {
       apiKey = _envKey;
@@ -104,6 +126,7 @@ class AssistantController extends ChangeNotifier {
       await _tts.awaitSpeakCompletion(true);
       final hi = await _tts.isLanguageAvailable('hi-IN');
       await _tts.setLanguage(hi == true ? 'hi-IN' : 'en-US');
+      _hiTts = hi == true;
       await applyVoice();
     } catch (_) {
       // TTS is optional; the UI still shows replies as text.
@@ -133,6 +156,7 @@ class AssistantController extends ChangeNotifier {
       }
       await _tts.setSpeechRate(voiceRate);
       await _tts.setPitch(voicePitch);
+      _gemini.devanagari = elevenKey.trim().isNotEmpty || _hiTts;
     } catch (_) {}
   }
 
@@ -172,6 +196,29 @@ class AssistantController extends ChangeNotifier {
       if (voiceName != null) await prefs.setString('voice_name', voiceName!);
     } catch (_) {}
     await applyVoice();
+  }
+
+  Future<void> saveEleven({String? key, String? voiceId}) async {
+    if (key != null) elevenKey = key.trim();
+    if (voiceId != null) {
+      elevenVoiceId = voiceId.trim().isEmpty ? _defaultVoiceId : voiceId.trim();
+    }
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('eleven_key', elevenKey);
+      await prefs.setString('eleven_voice', elevenVoiceId);
+    } catch (_) {}
+    voiceNote = '';
+    await applyVoice();
+  }
+
+  Future<void> saveListenLang(String lang) async {
+    listenLang = lang;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('listen_lang', lang);
+    } catch (_) {}
+    _notify();
   }
 
   Future<void> previewVoice() =>
@@ -265,6 +312,7 @@ class AssistantController extends ChangeNotifier {
       case Phase.speaking:
         try {
           await _tts.stop();
+          await _player.stop();
         } catch (_) {}
         _setIdle('Stopped. Tap the arc reactor to give a command.');
         break;
@@ -287,6 +335,7 @@ class AssistantController extends ChangeNotifier {
     try {
       await _stt.listen(
         onResult: _onCommandResult,
+        localeId: _localeId,
         listenFor: const Duration(seconds: 20),
         pauseFor: const Duration(seconds: 3),
         listenOptions: SpeechListenOptions(
@@ -320,6 +369,7 @@ class AssistantController extends ChangeNotifier {
 
   Future<void> _process(String text) async {
     chat.add(ChatMessage(true, text));
+    actionLog = '';
     _set(Phase.thinking, 'Contacting Gemini…');
     try {
       final answer = await _gemini.ask(text, apiKey);
@@ -343,9 +393,87 @@ class AssistantController extends ChangeNotifier {
     }
   }
 
+  String _elevenError(int code) {
+    switch (code) {
+      case 401:
+        return 'ElevenLabs key invalid (401). Using phone voice.';
+      case 402:
+      case 403:
+        return 'ElevenLabs plan does not allow this voice ($code). Use a premade voice ID. Using phone voice.';
+      case 404:
+        return 'ElevenLabs voice ID not found (404). Using phone voice.';
+      case 429:
+        return 'ElevenLabs quota or rate limit (429). Using phone voice.';
+      default:
+        return 'ElevenLabs error ($code). Using phone voice.';
+    }
+  }
+
+  Future<bool> _speakEleven(String text) async {
+    try {
+      final cacheKey = '$elevenVoiceId|$text';
+      Uint8List? bytes = _audioCache[cacheKey];
+      if (bytes == null) {
+        final res = await http
+            .post(
+              Uri.https('api.elevenlabs.io', '/v1/text-to-speech/$elevenVoiceId',
+                  {'output_format': 'mp3_44100_128'}),
+              headers: {
+                'xi-api-key': elevenKey.trim(),
+                'Content-Type': 'application/json',
+                'Accept': 'audio/mpeg',
+              },
+              body: jsonEncode({
+                'text': text,
+                'model_id': 'eleven_multilingual_v2',
+                'voice_settings': {
+                  'stability': 0.4,
+                  'similarity_boost': 0.8,
+                  'style': 0.35,
+                  'use_speaker_boost': true,
+                },
+              }),
+            )
+            .timeout(const Duration(seconds: 25));
+        if (res.statusCode != 200) {
+          voiceNote = _elevenError(res.statusCode);
+          _notify();
+          return false;
+        }
+        bytes = res.bodyBytes;
+        if (text.length < 60) _audioCache[cacheKey] = bytes;
+      }
+      final done = Completer<void>();
+      final sub = _player.onPlayerStateChanged.listen((st) {
+        if ((st == PlayerState.completed || st == PlayerState.stopped) &&
+            !done.isCompleted) {
+          done.complete();
+        }
+      });
+      await _player.play(BytesSource(bytes, mimeType: 'audio/mpeg'));
+      await done.future.timeout(const Duration(seconds: 120), onTimeout: () {});
+      await sub.cancel();
+      if (voiceNote.isNotEmpty) {
+        voiceNote = '';
+        _notify();
+      }
+      return true;
+    } catch (_) {
+      voiceNote = 'ElevenLabs unreachable. Using phone voice.';
+      _notify();
+      return false;
+    }
+  }
+
   Future<void> _speak(String text) async {
     try {
       final clean = text.replaceAll(RegExp(r'[*_`#]'), '');
+      if (elevenKey.trim().isNotEmpty && await _speakEleven(clean)) return;
+      if (!_hiTts && RegExp(r'[\u0900-\u097F]').hasMatch(clean)) {
+        voiceNote =
+            'Phone has no Hindi voice. Add an ElevenLabs key or install Hindi in Google Text-to-speech.';
+        _notify();
+      }
       await _tts.speak(clean);
     } catch (_) {}
   }
@@ -364,6 +492,7 @@ class AssistantController extends ChangeNotifier {
       _wakeListening = true;
       await _stt.listen(
         onResult: _onWakeResult,
+        localeId: _localeId,
         listenFor: const Duration(seconds: 60),
         pauseFor: const Duration(seconds: 8),
         listenOptions: SpeechListenOptions(
@@ -411,6 +540,7 @@ class AssistantController extends ChangeNotifier {
     final benign =
         e.errorMsg == 'error_speech_timeout' || e.errorMsg == 'error_no_match';
     final denied = e.errorMsg == 'error_permission';
+    if (e.errorMsg.contains('language')) listenLang = '';
 
     if (phase == Phase.listening) {
       if (_commandHandled) return;
@@ -438,6 +568,7 @@ class AssistantController extends ChangeNotifier {
     _disposed = true;
     _stt.cancel();
     _tts.stop();
+    _player.dispose();
     super.dispose();
   }
 }
@@ -504,15 +635,7 @@ class HomeScreen extends StatelessWidget {
     final c = context.watch<AssistantController>();
 
     return Scaffold(
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: RadialGradient(
-            center: Alignment(0, -0.25),
-            radius: 1.15,
-            colors: [Color(0xFF2B1300), kBlack],
-          ),
-        ),
-        child: SafeArea(
+      body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
           child: Column(
@@ -532,8 +655,8 @@ class HomeScreen extends StatelessWidget {
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         SizedBox(
-                          width: math.max(size, 60),
-                          height: math.max(size, 60),
+                          width: math.max(size, 120),
+                          height: math.max(size, 120),
                           child: ArcReactor(
                             phase: c.phase,
                             onTap: c.onReactorTap,
@@ -554,12 +677,10 @@ class HomeScreen extends StatelessWidget {
                 ),
               ),
               _StatusPanel(controller: c),
-              const SizedBox(height: 10),
-              const _CommandBar(),
             ],
           ),
         ),
-      )),
+      ),
     );
   }
 
@@ -756,7 +877,7 @@ class _StatusPanel extends StatelessWidget {
     return AnimatedContainer(
       duration: const Duration(milliseconds: 250),
       width: double.infinity,
-      constraints: const BoxConstraints(maxHeight: 110),
+      constraints: const BoxConstraints(maxHeight: 190),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: kPanel,
@@ -785,6 +906,16 @@ class _StatusPanel extends StatelessWidget {
                 ),
               ],
             ),
+            if (controller.actionLog.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text('⚙ ${controller.actionLog}',
+                  style: const TextStyle(color: kGold, fontSize: 12)),
+            ],
+            if (controller.voiceNote.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Text(controller.voiceNote,
+                  style: const TextStyle(color: kError, fontSize: 12)),
+            ],
             if (controller.reply.isNotEmpty) ...[
               const SizedBox(height: 10),
               Text(
@@ -1004,6 +1135,44 @@ class _ReactorPainter extends CustomPainter {
         ..color = kAmber.withValues(alpha: 0.35 + 0.5 * intensity),
     );
 
+    // Radar sweep
+    canvas.drawCircle(
+      c,
+      r * 0.92,
+      Paint()
+        ..shader = SweepGradient(
+          colors: [
+            kOrange.withValues(alpha: 0.0),
+            kOrange.withValues(alpha: 0.30 * intensity),
+          ],
+          transform: GradientRotation(t * _twoPi * 2),
+        ).createShader(Rect.fromCircle(center: c, radius: r * 0.92)),
+    );
+
+    // HUD tick ring
+    final tick = Paint()
+      ..strokeWidth = 1.5
+      ..color = kAmber.withValues(alpha: 0.25 + 0.4 * intensity);
+    for (var i = 0; i < 72; i++) {
+      final ang = i * _twoPi / 72 - t * _twoPi * 0.25;
+      final dir = Offset(math.cos(ang), math.sin(ang));
+      final inner = r * (i % 6 == 0 ? 0.89 : 0.92);
+      canvas.drawLine(c + dir * inner, c + dir * (r * 0.955), tick);
+    }
+
+    // Orbiting particles
+    for (var i = 0; i < 16; i++) {
+      final ang = t * _twoPi * (i.isEven ? 1.0 : -0.7) + i * 0.9;
+      final rad = r * (0.30 + 0.60 * ((i * 37) % 10) / 10);
+      canvas.drawCircle(
+        c + Offset(math.cos(ang), math.sin(ang)) * rad,
+        2.0 + (i % 3),
+        Paint()
+          ..color = kGold.withValues(alpha: 0.35 + 0.5 * pulse * intensity)
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3),
+      );
+    }
+
     _arcs(canvas, c, r * 0.84, 12, 0.55, t * _twoPi, 8, kOrange, true);
     _arcs(canvas, c, r * 0.68, 6, 0.7, -t * _twoPi * 1.5, 5, kGold, true);
     _arcs(canvas, c, r * 0.55, 24, 0.4, t * _twoPi * 2, 3, kAmber, false);
@@ -1063,101 +1232,6 @@ class _ReactorPainter extends CustomPainter {
 
 
 // ─────────────────────────────────────────────────────────────
-// Command bar: quick chips + typed commands
-// ─────────────────────────────────────────────────────────────
-class _CommandBar extends StatefulWidget {
-  const _CommandBar();
-  @override
-  State<_CommandBar> createState() => _CommandBarState();
-}
-
-class _CommandBarState extends State<_CommandBar> {
-  final TextEditingController _text = TextEditingController();
-
-  static const List<String> _chips = [
-    'मेरे लिए एक पोर्टफोलियो वेबसाइट बनाओ',
-    'पटना का मैप दिखाओ',
-    'बैटरी कितनी है?',
-    'फ्लैशलाइट ऑन करो',
-    'YouTube पर कोई गाना चलाओ',
-  ];
-
-  @override
-  void dispose() {
-    _text.dispose();
-    super.dispose();
-  }
-
-  void _send(String t) {
-    context.read<AssistantController>().sendText(t);
-    _text.clear();
-    FocusScope.of(context).unfocus();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        SizedBox(
-          height: 36,
-          child: ListView.separated(
-            scrollDirection: Axis.horizontal,
-            itemCount: _chips.length,
-            separatorBuilder: (_, __) => const SizedBox(width: 8),
-            itemBuilder: (_, i) => ActionChip(
-              label: Text(_chips[i],
-                  style: const TextStyle(color: kGold, fontSize: 12)),
-              backgroundColor: kPanel,
-              side: BorderSide(color: kAmber.withValues(alpha: 0.5)),
-              onPressed: () => _send(_chips[i]),
-            ),
-          ),
-        ),
-        const SizedBox(height: 8),
-        Row(
-          children: [
-            Expanded(
-              child: TextField(
-                controller: _text,
-                style: const TextStyle(color: Colors.white),
-                textInputAction: TextInputAction.send,
-                onSubmitted: _send,
-                decoration: InputDecoration(
-                  hintText: 'Type a command…',
-                  hintStyle: const TextStyle(color: Colors.white38),
-                  filled: true,
-                  fillColor: kPanel,
-                  contentPadding:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(24),
-                    borderSide: BorderSide(color: kAmber.withValues(alpha: 0.5)),
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(24),
-                    borderSide: BorderSide(color: kAmber.withValues(alpha: 0.5)),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(24),
-                    borderSide: const BorderSide(color: kGold),
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            IconButton.filled(
-              style: IconButton.styleFrom(backgroundColor: kOrange),
-              onPressed: () => _send(_text.text),
-              icon: const Icon(Icons.send_rounded, color: Colors.white),
-            ),
-          ],
-        ),
-      ],
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────
 // Assistant name + voice controls (inside Settings)
 // ─────────────────────────────────────────────────────────────
 class _NameAndVoice extends StatefulWidget {
@@ -1168,6 +1242,9 @@ class _NameAndVoice extends StatefulWidget {
 
 class _NameAndVoiceState extends State<_NameAndVoice> {
   late final TextEditingController _name;
+  late final TextEditingController _eKey;
+  late final TextEditingController _eVoice;
+  late String _lang;
   late double _pitch;
   late double _rate;
   String? _voice;
@@ -1178,6 +1255,9 @@ class _NameAndVoiceState extends State<_NameAndVoice> {
     super.initState();
     final c = context.read<AssistantController>();
     _name = TextEditingController(text: c.assistantName);
+    _eKey = TextEditingController(text: c.elevenKey);
+    _eVoice = TextEditingController(text: c.elevenVoiceId);
+    _lang = c.listenLang;
     _pitch = c.voicePitch;
     _rate = c.voiceRate;
     _voice = c.voiceName;
@@ -1189,6 +1269,8 @@ class _NameAndVoiceState extends State<_NameAndVoice> {
   @override
   void dispose() {
     _name.dispose();
+    _eKey.dispose();
+    _eVoice.dispose();
     super.dispose();
   }
 
@@ -1218,6 +1300,55 @@ class _NameAndVoiceState extends State<_NameAndVoice> {
           onChanged: (v) => c.saveVoice(name: v),
         ),
         const SizedBox(height: 10),
+        const SizedBox(height: 6),
+        const Text('ElevenLabs voice (recommended)',
+            style: TextStyle(color: kGold, fontSize: 13)),
+        TextField(
+          controller: _eKey,
+          obscureText: true,
+          style: const TextStyle(color: Colors.white),
+          decoration: const InputDecoration(
+            labelText: 'ElevenLabs API key',
+            labelStyle: TextStyle(color: kAmber),
+          ),
+          onChanged: (v) => c.saveEleven(key: v),
+        ),
+        TextField(
+          controller: _eVoice,
+          style: const TextStyle(color: Colors.white),
+          decoration: const InputDecoration(
+            labelText: 'ElevenLabs Voice ID',
+            labelStyle: TextStyle(color: kAmber),
+          ),
+          onChanged: (v) => c.saveEleven(voiceId: v),
+        ),
+        const SizedBox(height: 12),
+        const Text('Microphone language',
+            style: TextStyle(color: Colors.white70, fontSize: 13)),
+        DropdownButton<String>(
+          isExpanded: true,
+          dropdownColor: kPanel,
+          value: _lang,
+          items: const [
+            DropdownMenuItem(
+                value: 'hi_IN',
+                child: Text('Hindi (India)', style: TextStyle(color: Colors.white))),
+            DropdownMenuItem(
+                value: 'en_IN',
+                child: Text('English (India)', style: TextStyle(color: Colors.white))),
+            DropdownMenuItem(
+                value: '',
+                child: Text('Phone default', style: TextStyle(color: Colors.white))),
+          ],
+          onChanged: (v) {
+            if (v == null) return;
+            setState(() => _lang = v);
+            c.saveListenLang(v);
+          },
+        ),
+        const SizedBox(height: 10),
+        Text('Phone voice (fallback)  ',
+            style: const TextStyle(color: Colors.white54, fontSize: 12)),
         Text('Voice pitch  ${_pitch.toStringAsFixed(2)}',
             style: const TextStyle(color: Colors.white70, fontSize: 13)),
         Slider(
