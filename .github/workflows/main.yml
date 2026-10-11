@@ -21,10 +21,30 @@ jobs:
           channel: stable
           cache: true
 
+      - name: Generate fresh android project (v2 embedding)
+        run: |
+          rm -rf android
+          flutter create --platforms=android --org com.myra --project-name max_assistant .
+
       - name: Set minSdk to 24
         run: |
           sed -i -E 's/minSdk(Version)?\s*=?\s*(flutter\.minSdkVersion|[0-9]+)/minSdk = 24/' android/app/build.gradle*
           grep -n "minSdk" android/app/build.gradle*
+
+      - name: Add Android permissions
+        run: |
+          MANIFEST=android/app/src/main/AndroidManifest.xml
+          sed -i '/<application/i \
+              <uses-permission android:name="android.permission.INTERNET"/>\
+              <uses-permission android:name="android.permission.RECORD_AUDIO"/>\
+              <uses-permission android:name="android.permission.CAMERA"/>\
+              <uses-permission android:name="android.permission.VIBRATE"/>\
+              <uses-permission android:name="android.permission.WAKE_LOCK"/>\
+              <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>\
+              <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>\
+              <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>\
+              <queries><intent><action android:name="android.speech.RecognitionService"/></intent><intent><action android:name="android.intent.action.TTS_SERVICE"/></intent><intent><action android:name="android.intent.action.VIEW"/><data android:scheme="https"/></intent></queries>' $MANIFEST
+          cat $MANIFEST
 
       - run: flutter pub get
 
