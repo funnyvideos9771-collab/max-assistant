@@ -38,6 +38,34 @@ jobs:
             fi
           done
 
+      - name: Force compileSdk 36 on all plugins
+        run: |
+          if [ -f android/build.gradle.kts ]; then
+            cat >> android/build.gradle.kts <<'EOF'
+
+          subprojects {
+              afterEvaluate {
+                  val android = extensions.findByName("android")
+                  if (android is com.android.build.gradle.BaseExtension) {
+                      android.compileSdkVersion(36)
+                  }
+              }
+          }
+          EOF
+          else
+            cat >> android/build.gradle <<'EOF'
+
+          subprojects {
+              afterEvaluate { project ->
+                  if (project.hasProperty("android")) {
+                      project.android.compileSdkVersion 36
+                  }
+              }
+          }
+          EOF
+          fi
+          tail -15 android/build.gradle*
+
       - name: Add Android permissions
         run: |
           MANIFEST=android/app/src/main/AndroidManifest.xml
