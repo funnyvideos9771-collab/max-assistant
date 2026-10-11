@@ -1,83 +1,43 @@
-name: Build APK
+name: Build MYRA APK
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Java
-        uses: actions/setup-java@v4
+      - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: "17"
 
-      - name: Setup Flutter
-        uses: subosito/flutter-action@v2
+      - uses: subosito/flutter-action@v2
         with:
           channel: stable
           cache: true
 
-      - name: Use fixed signing key
+      - name: Set minSdk to 24
         run: |
-          mkdir -p ~/.android
-          if [ -f debug.keystore ]; then
-            cp debug.keystore ~/.android/debug.keystore
-            echo "Fixed keystore installed"
-          else
-            echo "WARNING: debug.keystore repo mein nahi hai, update install nahi hoga"
-          fi
+          sed -i -E 's/minSdk(Version)?\s*=?\s*(flutter\.minSdkVersion|[0-9]+)/minSdk = 24/' android/app/build.gradle*
+          grep -n "minSdk" android/app/build.gradle*
 
-      - name: Recreate Android project
+      - run: flutter pub get
+
+      - name: Build APK
         run: |
-          rm -rf android
-          flutter create --platforms=android --project-name max_app .
+          set -o pipefail
+          flutter build apk --release 2>&1 | tee build.log
 
-      - name: Add permissions
-        run: |
-          python3 - <<'PY'
-          p = 'android/app/src/main/AndroidManifest.xml'
-          s = open(p).read()
-          perms = '''
-              <uses-permission android:name="android.permission.INTERNET"/>
-              <uses-permission android:name="android.permission.RECORD_AUDIO"/>
-              <uses-permission android:name="android.permission.CAMERA"/>
-              <uses-permission android:name="android.permission.READ_CONTACTS"/>
-              <uses-permission android:name="android.permission.CALL_PHONE"/>
-              <uses-permission android:name="android.permission.READ_PHONE_STATE"/>
-              <uses-permission android:name="android.permission.SET_ALARM"/>
-              <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"/>
-              <queries>
-                  <intent><action android:name="android.intent.action.TTS_SERVICE"/></intent>
-                  <intent><action android:name="android.speech.RecognitionService"/></intent>
-                  <intent><action android:name="android.intent.action.VIEW"/><data android:scheme="https"/></intent>
-                  <intent><action android:name="android.intent.action.VIEW"/><data android:scheme="tel"/></intent>
-                  <intent><action android:name="android.intent.action.VIEW"/><data android:scheme="sms"/></intent>
-              </queries>
-          '''
-          s = s.replace('<application', perms + '<application', 1)
-          open(p, 'w').write(s)
-          PY
+      - name: Show the real error
+        if: failure()
+        run: grep -n -B2 -A14 "What went wrong\|Error:\|error:" build.log | head -80
 
-      - name: Set minSdk 24
-        run: |
-          f=$(ls android/app/build.gradle* | head -n 1)
-          sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 24/; s/minSdkVersion flutter.minSdkVersion/minSdkVersion 24/' "$f"
-
-      - name: Get packages
-        run: flutter pub get
-
-      - name: Build release APK
-        run: flutter build apk --release
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          name: max-apk
+          name: myra-apk
           path: build/app/outputs/flutter-apk/app-release.apk
