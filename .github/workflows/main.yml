@@ -21,15 +21,22 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Generate fresh android project (v2 embedding)
+      - name: Generate fresh android project
         run: |
           rm -rf android
           flutter create --platforms=android --org com.myra --project-name max_assistant .
 
-      - name: Set minSdk to 24
+      - name: Set minSdk 24 and compileSdk 36
         run: |
-          sed -i -E 's/minSdk(Version)?\s*=?\s*(flutter\.minSdkVersion|[0-9]+)/minSdk = 24/' android/app/build.gradle*
-          grep -n "minSdk" android/app/build.gradle*
+          for f in android/app/build.gradle android/app/build.gradle.kts; do
+            if [ -f "$f" ]; then
+              sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 24/' "$f"
+              sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 24/' "$f"
+              sed -i 's/compileSdk = flutter.compileSdkVersion/compileSdk = 36/' "$f"
+              sed -i 's/compileSdkVersion flutter.compileSdkVersion/compileSdkVersion 36/' "$f"
+              grep -n "minSdk\|compileSdk" "$f"
+            fi
+          done
 
       - name: Add Android permissions
         run: |
@@ -44,18 +51,18 @@ jobs:
               <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>\
               <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>\
               <queries><intent><action android:name="android.speech.RecognitionService"/></intent><intent><action android:name="android.intent.action.TTS_SERVICE"/></intent><intent><action android:name="android.intent.action.VIEW"/><data android:scheme="https"/></intent></queries>' $MANIFEST
-          cat $MANIFEST
 
       - run: flutter pub get
 
       - name: Build APK
         run: |
           set -o pipefail
-          flutter build apk --release 2>&1 | tee build.log
+          flutter build apk --release --no-tree-shake-icons 2>&1 | tee build.log
 
       - name: Show the real error
         if: failure()
-        run: grep -n -B2 -A14 "What went wrong\|Error:\|error:" build.log | head -80
+        run: |
+          grep -n -A25 "What went wrong" build.log | head -60
 
       - uses: actions/upload-artifact@v4
         with:
