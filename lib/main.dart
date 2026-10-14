@@ -26,6 +26,8 @@ const kBg = Color(0xFF07070B);
 const kCard = Color(0xFF12121A);
 const kLine = Color(0xFF262633);
 const kMut = Color(0xFF8A8A9A);
+const kPurple = Color(0xFFB44DFF);
+const kLav = Color(0xFFB993FF);
 
 final msgKey = GlobalKey<ScaffoldMessengerState>();
 void toast(String m) {
@@ -33,6 +35,32 @@ void toast(String m) {
   if (s == null) return;
   s.hideCurrentSnackBar();
   s.showSnackBar(SnackBar(content: Text(m), duration: const Duration(seconds: 4)));
+}
+
+Future<bool> openLink(String url) async {
+  try {
+    return await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+  } catch (_) {
+    return false;
+  }
+}
+
+Future<bool> openDialer() async {
+  try {
+    await const AndroidIntent(action: 'android.intent.action.DIAL', data: 'tel:').launch();
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+Future<bool> openCamera() async {
+  try {
+    await const AndroidIntent(action: 'android.media.action.IMAGE_CAPTURE').launch();
+    return true;
+  } catch (_) {
+    return false;
+  }
 }
 
 class Persona {
@@ -97,17 +125,96 @@ Uint8List sirenWav() {
   return b.toBytes();
 }
 
+// ───────────────────────── particle orb ─────────────────────────
+class ParticleOrb extends StatefulWidget {
+  final double size;
+  final Color color;
+  final bool active;
+  const ParticleOrb({required this.size, required this.color, this.active = false, super.key});
+  @override
+  State<ParticleOrb> createState() => _ParticleOrbS();
+}
+
+class _ParticleOrbS extends State<ParticleOrb> with SingleTickerProviderStateMixin {
+  late final AnimationController c = AnimationController(vsync: this, duration: const Duration(seconds: 8))..repeat();
+  late final List<List<double>> pts = _gen(260);
+
+  static List<List<double>> _gen(int n) {
+    final out = <List<double>>[];
+    final ga = pi * (3 - sqrt(5));
+    for (var i = 0; i < n; i++) {
+      final y = 1 - 2 * (i + 0.5) / n;
+      final r = sqrt(max(0.0, 1 - y * y));
+      final th = ga * i;
+      out.add([cos(th) * r, y, sin(th) * r]);
+    }
+    return out;
+  }
+
+  @override
+  void dispose() {
+    c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => SizedBox(
+        width: widget.size,
+        height: widget.size,
+        child: AnimatedBuilder(
+          animation: c,
+          builder: (_, __) => CustomPaint(painter: _OrbPainter(pts, c.value, widget.color, widget.active)),
+        ),
+      );
+}
+
+class _OrbPainter extends CustomPainter {
+  final List<List<double>> pts;
+  final double t;
+  final Color color;
+  final bool active;
+  _OrbPainter(this.pts, this.t, this.color, this.active);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final c = size.center(Offset.zero);
+    final base = size.width / 2 * 0.86;
+    final pulse = active ? 1 + 0.07 * sin(t * 2 * pi * 16) : 1 + 0.02 * sin(t * 2 * pi * 4);
+    final rad = base * pulse;
+    canvas.drawCircle(
+      c,
+      rad,
+      Paint()..shader = RadialGradient(colors: [color.withOpacity(0.28), Colors.transparent]).createShader(Rect.fromCircle(center: c, radius: rad)),
+    );
+    final a = t * 2 * pi;
+    final ca = cos(a), sa = sin(a);
+    final p = Paint();
+    for (final q in pts) {
+      final x = q[0] * ca + q[2] * sa;
+      final z = -q[0] * sa + q[2] * ca;
+      final y = q[1];
+      final d = (z + 1) / 2;
+      p.color = color.withOpacity(0.2 + 0.8 * d);
+      canvas.drawCircle(Offset(c.dx + x * rad, c.dy + y * rad), (0.6 + 1.3 * d) * size.width / 100, p);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _OrbPainter old) => true;
+}
+
 // ───────────────────────── app state / engine ─────────────────────────
 class AppState extends ChangeNotifier {
   late SharedPreferences p;
 
-  String name = 'Boss', persona = 'robot', provider = 'gemini', tts = 'device', lang = 'hi-IN', theme = 'crimson';
+  String name = 'Boss', persona = 'robot', provider = 'gemini', tts = 'device', lang = 'hi-IN', theme = 'purple';
   String avatar = '', wall = '', pin = '';
   String kGemini = '', kGrok = '', kEleven = '', kPico = '';
   String mGemini = 'gemini-2.5-flash', mGrok = 'grok-4';
+  String mGeminiFb = 'gemini-2.5-flash-lite,gemini-2.0-flash';
   String vidRobot = '21m00Tcm4TlvDq8ikWAM', vidCasual = 'EXAVITQu4vr4xnSDxMaL';
   bool speakOn = true, haptic = true, wakeOn = false;
-  int orb = 0xFFE8182F;
+  int orb = 0xFFB44DFF;
   String wakeWord = 'Myra';
   double wakeSens = 0.7;
 
@@ -125,7 +232,7 @@ class AppState extends ChangeNotifier {
         'name': name, 'persona': persona, 'provider': provider, 'tts': tts, 'lang': lang, 'theme': theme,
         'avatar': avatar, 'wall': wall, 'pin': pin,
         'kGemini': kGemini, 'kGrok': kGrok, 'kEleven': kEleven, 'kPico': kPico,
-        'mGemini': mGemini, 'mGrok': mGrok, 'vidRobot': vidRobot, 'vidCasual': vidCasual,
+        'mGemini': mGemini, 'mGrok': mGrok, 'mGeminiFb': mGeminiFb, 'vidRobot': vidRobot, 'vidCasual': vidCasual,
         'speakOn': speakOn, 'haptic': haptic, 'wakeOn': wakeOn, 'orb': orb, 'wakeWord': wakeWord, 'wakeSens': wakeSens,
         'tgVoice': tgVoice, 'tgVib': tgVib, 'tgSiren': tgSiren, 'tgFull': tgFull, 'tgNotify': tgNotify, 'tgPhoto': tgPhoto,
         'tgSens': tgSens, 'tgPhone': tgPhone, 'tgVol': tgVol, 'photos': photos,
@@ -136,7 +243,7 @@ class AppState extends ChangeNotifier {
     tts = m['tts'] ?? tts; lang = m['lang'] ?? lang; theme = m['theme'] ?? theme;
     avatar = m['avatar'] ?? avatar; wall = m['wall'] ?? wall; pin = m['pin'] ?? pin;
     kGemini = m['kGemini'] ?? kGemini; kGrok = m['kGrok'] ?? kGrok; kEleven = m['kEleven'] ?? kEleven; kPico = m['kPico'] ?? kPico;
-    mGemini = m['mGemini'] ?? mGemini; mGrok = m['mGrok'] ?? mGrok;
+    mGemini = m['mGemini'] ?? mGemini; mGrok = m['mGrok'] ?? mGrok; mGeminiFb = m['mGeminiFb'] ?? mGeminiFb;
     vidRobot = m['vidRobot'] ?? vidRobot; vidCasual = m['vidCasual'] ?? vidCasual;
     speakOn = m['speakOn'] ?? speakOn; haptic = m['haptic'] ?? haptic; wakeOn = m['wakeOn'] ?? wakeOn;
     orb = m['orb'] ?? orb; wakeWord = m['wakeWord'] ?? wakeWord; wakeSens = (m['wakeSens'] ?? wakeSens).toDouble();
@@ -156,6 +263,14 @@ class AppState extends ChangeNotifier {
     if (mj != null) {
       try { mem = (jsonDecode(mj) as List).map((e) => Mem.from(Map<String, dynamic>.from(e))).toList(); } catch (_) {}
     }
+    // one-time switch to the new purple look
+    if (p.getBool('ui2') != true) {
+      orb = 0xFFB44DFF;
+      theme = 'purple';
+      if (mGeminiFb.trim().isEmpty) mGeminiFb = 'gemini-2.5-flash-lite,gemini-2.0-flash';
+      await p.setBool('ui2', true);
+      save(notify: false);
+    }
   }
 
   void save({bool notify = true}) {
@@ -172,34 +287,111 @@ class AppState extends ChangeNotifier {
       (modePrompts[mode] ?? '') +
       '\nToday is ${DateTime.now().toString().substring(0, 10)}.';
 
+  // ── Voice commands that open apps (no AI needed) ──
+  Future<String?> localCommand(String raw) async {
+    final t = raw.toLowerCase();
+    bool has(List<String> w) => w.any((x) => t.contains(x));
+    final wantsCall = has(['call', 'dial', 'कॉल', 'डायल']) && has(['karo', 'lagao', 'laga', 'open', 'kholo', 'करो', 'लगाओ', 'खोलो']);
+    if (wantsCall) {
+      return await openDialer() ? 'Dialer khol diya.' : 'Dialer nahi khul paya.';
+    }
+    final openVerb = has(['kholo', 'khol do', 'khol', 'open', 'chalao', 'chala do', 'launch', 'खोलो', 'खोल', 'चलाओ']);
+    if (!openVerb) return null;
+    Future<String> go(String nm, List<String> urls) async {
+      for (final u in urls) {
+        if (await openLink(u)) return '$nm khol diya.';
+      }
+      return '$nm nahi khul paya.';
+    }
+    if (has(['youtube', 'यूट्यूब', 'यूटयूब'])) return go('YouTube', ['vnd.youtube://', 'https://www.youtube.com']);
+    if (has(['whatsapp', 'व्हाट्सएप', 'व्हाट्सऐप', 'वाट्सएप'])) return go('WhatsApp', ['whatsapp://send', 'https://wa.me/']);
+    if (has(['music', 'gaana', 'gana', 'spotify', 'म्यूजिक', 'गाना'])) return go('Music', ['https://music.youtube.com']);
+    if (has(['maps', 'map', 'मैप'])) return go('Maps', ['https://maps.google.com']);
+    if (has(['camera', 'कैमरा'])) return await openCamera() ? 'Camera khol diya.' : 'Camera nahi khul paya.';
+    return null;
+  }
+
   // ── AI ──
+  final Map<String, int> _cool = {};
+
+  List<Map<String, dynamic>> _geminiContents(List<Mem> prev, String text, Uint8List? img) {
+    final out = <Map<String, dynamic>>[];
+    void add(String role, List<Map<String, dynamic>> parts) {
+      if (out.isNotEmpty && out.last['role'] == role) {
+        (out.last['parts'] as List).addAll(parts);
+      } else {
+        out.add({'role': role, 'parts': List<Map<String, dynamic>>.from(parts)});
+      }
+    }
+    for (final m in prev) {
+      add(m.role == 'user' ? 'user' : 'model', [{'text': m.text}]);
+    }
+    while (out.isNotEmpty && out.first['role'] == 'model') {
+      out.removeAt(0);
+    }
+    final last = <Map<String, dynamic>>[
+      {'text': text},
+      if (img != null) {'inlineData': {'mimeType': 'image/jpeg', 'data': base64Encode(img)}},
+    ];
+    add('user', last);
+    return out;
+  }
+
   Future<String> askAI(String text, Uint8List? img) async {
     final key = provider == 'gemini' ? kGemini : kGrok;
-    if (key.isEmpty) throw Exception('${provider == 'gemini' ? 'Gemini' : 'Grok'} API key nahi hai. Settings > API & Cloud me daalo.');
+    if (key.trim().isEmpty) throw Exception('${provider == 'gemini' ? 'Gemini' : 'Grok'} API key nahi hai. Settings > API & Cloud me daalo.');
     final hist = mem.where((m) => m.role != 'sys').toList();
     final recent = hist.length > 17 ? hist.sublist(hist.length - 17) : hist;
     final prev = recent.sublist(0, recent.length - 1);
 
     if (provider == 'gemini') {
-      final contents = <Map<String, dynamic>>[
-        for (final m in prev) {'role': m.role == 'user' ? 'user' : 'model', 'parts': [{'text': m.text}]},
-        {
-          'role': 'user',
-          'parts': [
-            {'text': text},
-            if (img != null) {'inlineData': {'mimeType': 'image/jpeg', 'data': base64Encode(img)}},
-          ],
-        },
+      final keys = kGemini.split(RegExp(r'[\n,; ]+')).map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+      final models = <String>[mGemini, ...mGeminiFb.split(',')].map((e) => e.trim()).where((e) => e.isNotEmpty).toSet().toList();
+      final body = jsonEncode({
+        'systemInstruction': {'parts': [{'text': sysPrompt()}]},
+        'contents': _geminiContents(prev, text, img),
+      });
+      final now = DateTime.now().millisecondsSinceEpoch;
+      final combos = <List<String>>[
+        for (final m in models) for (final k in keys) [m, k],
       ];
-      final r = await http.post(
-        Uri.parse('https://generativelanguage.googleapis.com/v1beta/models/$mGemini:generateContent'),
-        headers: {'Content-Type': 'application/json', 'x-goog-api-key': key},
-        body: jsonEncode({'systemInstruction': {'parts': [{'text': sysPrompt()}]}, 'contents': contents}),
-      );
-      final j = jsonDecode(utf8.decode(r.bodyBytes));
-      if (r.statusCode != 200) throw Exception(j['error']?['message'] ?? 'Gemini error ${r.statusCode}');
-      final parts = j['candidates']?[0]?['content']?['parts'] as List?;
-      return parts?.map((x) => x['text'] ?? '').join() ?? '(khaali jawab aaya)';
+      final ready = combos.where((c) => (_cool['${c[0]}|${c[1]}'] ?? 0) < now).toList();
+      final order = ready.isEmpty ? combos : ready;
+      String lastErr = 'Gemini error';
+      for (final c in order) {
+        try {
+          final r = await http
+              .post(
+                Uri.parse('https://generativelanguage.googleapis.com/v1beta/models/${c[0]}:generateContent'),
+                headers: {'Content-Type': 'application/json', 'x-goog-api-key': c[1]},
+                body: body,
+              )
+              .timeout(const Duration(seconds: 45));
+          final j = jsonDecode(utf8.decode(r.bodyBytes));
+          if (r.statusCode == 200) {
+            final parts = j['candidates']?[0]?['content']?['parts'] as List?;
+            final out = parts?.map((x) => x['text'] ?? '').join() ?? '';
+            if (out.toString().trim().isNotEmpty) return out.toString();
+            lastErr = 'khaali jawab aaya';
+            continue;
+          }
+          final msg = (j['error']?['message'] ?? 'Gemini error ${r.statusCode}').toString();
+          lastErr = msg;
+          if (r.statusCode == 429) {
+            final daily = msg.contains('PerDay') || msg.toLowerCase().contains('per day');
+            _cool['${c[0]}|${c[1]}'] = now + (daily ? 1800000 : 60000);
+          }
+        } on TimeoutException {
+          lastErr = 'Gemini timeout (net slow hai)';
+        } catch (e) {
+          lastErr = e.toString();
+        }
+      }
+      final low = lastErr.toLowerCase();
+      if (low.contains('quota') || low.contains('limit') || low.contains('exhausted')) {
+        throw Exception('Gemini free limit abhi khatam hai. 1 minute ruko, ya Settings > API me aur Gemini keys (comma se alag karke) jodo.');
+      }
+      throw Exception(lastErr);
     } else {
       final msgs = <Map<String, dynamic>>[
         {'role': 'system', 'content': sysPrompt()},
@@ -235,11 +427,19 @@ class AppState extends ChangeNotifier {
     saveMem();
     goTab(1);
     try {
-      final a = await askAI(text.isEmpty ? 'Is image me kya hai?' : text, img);
-      final t = DateTime.now().millisecondsSinceEpoch;
-      mem.add(Mem(t, t, 'assistant', a));
-      saveMem();
-      speak(a);
+      final lc = img == null ? await localCommand(text) : null;
+      if (lc != null) {
+        final t = DateTime.now().millisecondsSinceEpoch;
+        mem.add(Mem(t, t, 'assistant', lc));
+        saveMem();
+        speak(lc);
+      } else {
+        final a = await askAI(text.isEmpty ? 'Is image me kya hai?' : text, img);
+        final t = DateTime.now().millisecondsSinceEpoch;
+        mem.add(Mem(t, t, 'assistant', a));
+        saveMem();
+        speak(a);
+      }
     } catch (e) {
       toast(e.toString().replaceFirst('Exception: ', ''));
     }
@@ -501,26 +701,60 @@ class Root extends StatefulWidget {
   State<Root> createState() => _RootS();
 }
 
-class _RootS extends State<Root> {
+class _RootS extends State<Root> with SingleTickerProviderStateMixin {
   bool splash = true;
+  late final AnimationController ac = AnimationController(vsync: this, duration: const Duration(milliseconds: 2800));
+
   @override
   void initState() {
     super.initState();
-    Future.delayed(const Duration(milliseconds: 1500), () { if (mounted) setState(() => splash = false); });
-    if (S.wakeOn) Future.delayed(const Duration(seconds: 2), S.startWake);
+    ac.forward().whenComplete(() async {
+      await Future.delayed(const Duration(milliseconds: 500));
+      if (mounted) setState(() => splash = false);
+    });
+    if (S.wakeOn) Future.delayed(const Duration(seconds: 3), S.startWake);
+  }
+
+  @override
+  void dispose() {
+    ac.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     if (splash) {
-      return const Scaffold(
-        body: Center(
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            Text('MYRA', style: TextStyle(fontSize: 42, letterSpacing: 10, fontWeight: FontWeight.w300)),
-            SizedBox(height: 12),
-            Text('YOUR PRIVATE AI VOICE ASSISTANT', style: TextStyle(color: kMut, letterSpacing: 3, fontSize: 11)),
-          ]),
-        ),
+      return AnimatedBuilder(
+        animation: ac,
+        builder: (context, _) {
+          final pct = (Curves.easeInOut.transform(ac.value) * 100).round();
+          final col = Color(S.orb);
+          return Scaffold(
+            body: Stack(fit: StackFit.expand, children: [
+              avatarWidget(),
+              const DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0x33000000), Color(0xFF07070B)], stops: [0.35, 1]),
+                ),
+              ),
+              Positioned(
+                left: 30, right: 30, bottom: 70,
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  Text(pct < 100 ? '$pct%' : 'INITIALIZATION COMPLETE', style: TextStyle(color: col, letterSpacing: 3, fontSize: 12, fontWeight: FontWeight.w700)),
+                  const SizedBox(height: 8),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(6),
+                    child: LinearProgressIndicator(value: pct / 100, minHeight: 8, color: col, backgroundColor: kCard),
+                  ),
+                  const SizedBox(height: 18),
+                  Text('MYRA', style: TextStyle(fontSize: 58, letterSpacing: 10, fontWeight: FontWeight.w800, color: Colors.white, shadows: [Shadow(color: col, blurRadius: 24)])),
+                  const SizedBox(height: 6),
+                  const Text('YOUR PRIVATE AI VOICE ASSISTANT', style: TextStyle(color: kMut, letterSpacing: 3, fontSize: 11)),
+                ]),
+              ),
+            ]),
+          );
+        },
       );
     }
     return const Shell();
@@ -555,7 +789,7 @@ Widget tile(String icon, String t, String d, VoidCallback onTap) => card(
       Row(children: [
         Container(
           width: 38, height: 38, alignment: Alignment.center,
-          decoration: BoxDecoration(color: const Color(0xFF2A0F16), borderRadius: BorderRadius.circular(12)),
+          decoration: BoxDecoration(color: const Color(0xFF1E1230), borderRadius: BorderRadius.circular(12)),
           child: Text(icon, style: const TextStyle(fontSize: 18)),
         ),
         const SizedBox(width: 12),
@@ -648,8 +882,8 @@ Widget avatarWidget() {
     return Image.file(File(S.avatar), fit: BoxFit.cover, width: double.infinity, height: double.infinity);
   }
   return Container(
-    decoration: const BoxDecoration(gradient: RadialGradient(center: Alignment(0, -0.3), colors: [Color(0xFF5A1230), Color(0xFF150D14)])),
-    child: const Center(child: Icon(Icons.face_3, size: 120, color: Color(0x88E8182F))),
+    decoration: const BoxDecoration(gradient: RadialGradient(center: Alignment(0, -0.3), colors: [Color(0xFF4B1A7A), Color(0xFF120A1C)])),
+    child: const Center(child: Icon(Icons.face_3, size: 120, color: Color(0x88B44DFF))),
   );
 }
 
@@ -711,6 +945,7 @@ class Shell extends StatelessWidget {
             ]),
           ),
         );
+    final oc = S.listening ? const Color(0xFF00E5FF) : Color(S.orb);
     return Container(
       color: const Color(0xF007070B),
       padding: EdgeInsets.only(bottom: MediaQuery.of(context).padding.bottom, top: 6),
@@ -720,16 +955,10 @@ class Shell extends StatelessWidget {
         GestureDetector(
           onTap: () { S.goTab(0); S.listenOnce((t) => S.send(t)); },
           child: Container(
-            width: 64, height: 64, margin: const EdgeInsets.only(bottom: 4),
-            padding: const EdgeInsets.all(4),
-            decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: Color(S.orb), width: 2), color: const Color(0xFF0A0A10)),
-            child: Container(
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: RadialGradient(center: const Alignment(-0.3, -0.4), colors: [const Color(0xFFFFD0A0), Color(S.orb), const Color(0xFF2B0A14)], stops: const [0, 0.45, 1]),
-                boxShadow: [BoxShadow(color: Color(S.orb), blurRadius: 18)],
-              ),
-            ),
+            width: 66, height: 66, margin: const EdgeInsets.only(bottom: 4),
+            padding: const EdgeInsets.all(3),
+            decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: oc, width: 2), color: const Color(0xFF0A0A10)),
+            child: ClipOval(child: ParticleOrb(size: 56, color: oc, active: S.listening)),
           ),
         ),
         item(Icons.bolt, 'Triggers', 2),
@@ -771,85 +1000,204 @@ class HomeTab extends StatefulWidget {
   State<HomeTab> createState() => _HomeS();
 }
 
-class _HomeS extends State<HomeTab> with SingleTickerProviderStateMixin {
+class _HomeS extends State<HomeTab> {
   final ctl = TextEditingController();
-  late final AnimationController pulse = AnimationController(vsync: this, duration: const Duration(milliseconds: 1400))..repeat();
 
   @override
-  void dispose() { pulse.dispose(); ctl.dispose(); super.dispose(); }
+  void dispose() { ctl.dispose(); super.dispose(); }
 
-  @override
-  Widget build(BuildContext context) {
-    final p = personas[S.persona]!;
-    final insights = ['The best way to predict the future is to create it.', 'Chhote kadam roz, bade badlav ek din.', 'Jo seekhna band kar de, wo badhna band kar deta hai.'];
-    return ListView(padding: const EdgeInsets.all(16), children: [
-      Row(children: [
-        Expanded(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('Hello, ${S.name}', style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w800)),
-            const Text('How can I assist you today?', style: TextStyle(color: kMut, fontSize: 13)),
+  Widget qa(IconData ic, String label, Color col, VoidCallback f) => SizedBox(
+        width: 62,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: f,
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Container(
+              width: 58, height: 58,
+              decoration: BoxDecoration(color: const Color(0xFF14141E), borderRadius: BorderRadius.circular(18), border: Border.all(color: kLine)),
+              child: Icon(ic, color: col, size: 26),
+            ),
+            const SizedBox(height: 6),
+            Text(label, textAlign: TextAlign.center, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 10.5, color: Color(0xFFD0D0DC))),
           ]),
         ),
-        Text('${p.label}\n${S.provider == 'gemini' ? 'Gemini' : 'Grok'}${S.tts == 'eleven' ? ' + ElevenLabs' : ''}', textAlign: TextAlign.right, style: const TextStyle(color: kMut, fontSize: 11)),
-      ]),
-      const SizedBox(height: 12),
-      ClipRRect(
-        borderRadius: BorderRadius.circular(24),
-        child: SizedBox(
-          height: 330,
-          child: Stack(alignment: Alignment.center, children: [
-            Positioned.fill(child: avatarWidget()),
-            Positioned.fill(child: DecoratedBox(decoration: BoxDecoration(gradient: LinearGradient(begin: Alignment.center, end: Alignment.bottomCenter, colors: [Colors.transparent, kBg.withOpacity(0.85)])))),
-            if (S.listening)
-              AnimatedBuilder(
-                animation: pulse,
-                builder: (c, _) => Container(
-                  width: 80 + 90 * pulse.value, height: 80 + 90 * pulse.value,
-                  decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: Color(S.orb).withOpacity(1 - pulse.value), width: 2)),
-                ),
-              ),
-            GestureDetector(
-              onTap: () => S.listenOnce((t) => S.send(t)),
-              child: Container(
-                width: 76, height: 76,
-                decoration: BoxDecoration(shape: BoxShape.circle, color: Color(S.orb), boxShadow: [BoxShadow(color: Color(S.orb), blurRadius: 28)]),
-                child: const Icon(Icons.mic, size: 34),
-              ),
-            ),
+      );
+
+  Future<void> _launch(String nm, List<String> urls) async {
+    for (final u in urls) {
+      if (await openLink(u)) return;
+    }
+    toast('$nm nahi khul paya');
+  }
+
+  void _more() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: kCard,
+      builder: (c) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Wrap(spacing: 14, runSpacing: 14, children: [
+            qa(Icons.map_outlined, 'Maps', const Color(0xFF4CAF50), () { Navigator.pop(c); _launch('Maps', ['https://maps.google.com']); }),
+            qa(Icons.photo_camera_outlined, 'Camera', kLav, () async { Navigator.pop(c); if (!await openCamera()) toast('Camera nahi khula'); }),
+            qa(Icons.psychology_outlined, 'Memory', kLav, () { Navigator.pop(c); open(context, pgMemory()); }),
+            qa(Icons.shield_outlined, 'Touch Guard', const Color(0xFFFF6B6B), () { Navigator.pop(c); S.goTab(2); }),
+            qa(Icons.settings_outlined, 'Settings', kMut, () { Navigator.pop(c); S.goTab(3); }),
           ]),
         ),
       ),
-      const SizedBox(height: 12),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ready = (S.provider == 'gemini' ? S.kGemini : S.kGrok).trim().isNotEmpty;
+    final lastAi = S.mem.where((m) => m.role == 'assistant').toList();
+    final oc = Color(S.orb);
+    return ListView(padding: const EdgeInsets.fromLTRB(16, 8, 16, 16), children: [
+      // header
       Row(children: [
-        Expanded(
-          child: TextField(
-            controller: ctl,
-            textInputAction: TextInputAction.send,
-            onSubmitted: (v) { ctl.clear(); S.send(v); },
-            decoration: InputDecoration(hintText: 'Ask MYRA anything...', filled: true, fillColor: kCard, border: OutlineInputBorder(borderRadius: BorderRadius.circular(14))),
-          ),
+        IconButton(
+          style: IconButton.styleFrom(side: const BorderSide(color: kLine)),
+          onPressed: () => S.goTab(3),
+          icon: const Icon(Icons.menu),
+        ),
+        const Expanded(
+          child: Column(children: [
+            Text('MYRA', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, letterSpacing: 4)),
+            Text('Your Intelligent AI Assistant', style: TextStyle(color: kMut, fontSize: 10)),
+          ]),
         ),
         IconButton(
-          onPressed: () async {
-            final b = await pickBytes();
-            if (b != null) { S.send(ctl.text.isEmpty ? 'Is image me kya hai? Samjhao.' : ctl.text, img: b); ctl.clear(); }
-          },
-          icon: const Icon(Icons.photo_camera_outlined),
-        ),
-        IconButton(
-          onPressed: () { final v = ctl.text; ctl.clear(); S.send(v); },
-          icon: Icon(Icons.send, color: Color(S.orb)),
+          style: IconButton.styleFrom(side: const BorderSide(color: kLine)),
+          onPressed: () => toast('Koi nayi notification nahi'),
+          icon: const Icon(Icons.notifications_none),
         ),
       ]),
       const SizedBox(height: 14),
-      card(Row(children: [const Text('🚀', style: TextStyle(fontSize: 24)), const SizedBox(width: 12), Expanded(child: titled('Mission Mode', 'Give MYRA a goal to plan step by step'))]),
-          onTap: () async {
-            final g = await askText(context, 'MYRA ko goal batao');
-            if (g != null && g.trim().isNotEmpty) { S.mode = 'mission'; S.send('Mission: $g'); }
-          }),
+      // hello card
+      Container(
+        height: 190,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(24),
+          gradient: const LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Color(0xFF1B0F2E), Color(0xFF0B0812)]),
+          border: Border.all(color: kLine),
+        ),
+        child: Row(children: [
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(18, 16, 0, 16),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.center, children: [
+                Text('Hello, ${S.name}', maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w800, height: 1.1)),
+                const SizedBox(height: 6),
+                const Text("I'm MYRA, here to help you anytime!", style: TextStyle(color: Color(0xFFD0D0DC), fontSize: 13)),
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: (ready ? const Color(0xFF1B5E20) : const Color(0xFF5E3B00)).withOpacity(0.6),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: ready ? const Color(0xFF4CAF50) : const Color(0xFFFFA726)),
+                  ),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Icon(Icons.circle, size: 9, color: ready ? const Color(0xFF4CAF50) : const Color(0xFFFFA726)),
+                    const SizedBox(width: 6),
+                    Text(ready ? 'Online • Ready' : 'API key daalo', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                  ]),
+                ),
+              ]),
+            ),
+          ),
+          ClipRRect(
+            borderRadius: const BorderRadius.only(topRight: Radius.circular(24), bottomRight: Radius.circular(24)),
+            child: SizedBox(width: 130, height: 190, child: avatarWidget()),
+          ),
+        ]),
+      ),
+      const SizedBox(height: 14),
+      // ask bar
+      Container(
+        padding: const EdgeInsets.only(left: 14, right: 6),
+        decoration: BoxDecoration(color: kCard, borderRadius: BorderRadius.circular(30), border: Border.all(color: oc.withOpacity(0.7))),
+        child: Row(children: [
+          Icon(Icons.auto_awesome, color: oc, size: 20),
+          const SizedBox(width: 10),
+          Expanded(
+            child: TextField(
+              controller: ctl,
+              textInputAction: TextInputAction.send,
+              onSubmitted: (v) { ctl.clear(); S.send(v); },
+              decoration: const InputDecoration(hintText: 'Ask me anything...', border: InputBorder.none, isDense: true),
+            ),
+          ),
+          IconButton(
+            onPressed: () async {
+              final b = await pickBytes();
+              if (b != null) { S.send(ctl.text.isEmpty ? 'Is image me kya hai? Samjhao.' : ctl.text, img: b); ctl.clear(); }
+            },
+            icon: const Icon(Icons.photo_camera_outlined, size: 22),
+          ),
+          IconButton(
+            onPressed: () => S.listenOnce((t) => S.send(t)),
+            icon: Icon(Icons.mic, color: S.listening ? const Color(0xFF00E5FF) : Colors.white),
+          ),
+        ]),
+      ),
+      const SizedBox(height: 18),
+      // quick actions
+      Row(children: [
+        const Text('Quick Actions', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+        const Spacer(),
+        GestureDetector(onTap: () => toast('Edit option agle version me aayega'), child: Text('Edit', style: TextStyle(color: oc, fontSize: 13))),
+      ]),
+      const SizedBox(height: 12),
+      Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+        qa(Icons.chat_bubble_outline, 'AI Chat', kLav, () => S.goTab(1)),
+        qa(Icons.mic_none, 'Voice Talk', kLav, () => S.listenOnce((t) => S.send(t))),
+        qa(Icons.desktop_windows_outlined, 'PC Connect', kLav, () => _launch('Remote Desktop', ['https://remotedesktop.google.com/access'])),
+        qa(Icons.smart_toy_outlined, 'Automation', kLav, () async {
+          final g = await askText(context, 'MYRA ko goal batao');
+          if (g != null && g.trim().isNotEmpty) { S.mode = 'mission'; S.send('Mission: $g'); }
+        }),
+        qa(Icons.center_focus_strong_outlined, 'Smart Scan', kLav, () async {
+          final b = await pickBytes(camera: true);
+          if (b != null) S.send('Is image ko detail me describe karo aur batao ye kya hai.', img: b);
+        }),
+      ]),
+      const SizedBox(height: 14),
+      Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+        qa(Icons.smart_display, 'YouTube', const Color(0xFFFF1744), () => _launch('YouTube', ['vnd.youtube://', 'https://www.youtube.com'])),
+        qa(Icons.chat, 'WhatsApp', const Color(0xFF25D366), () => _launch('WhatsApp', ['whatsapp://send', 'https://wa.me/'])),
+        qa(Icons.call, 'Calls', const Color(0xFF2196F3), () async { if (!await openDialer()) toast('Dialer nahi khula'); }),
+        qa(Icons.music_note, 'Music', const Color(0xFFFF1744), () => _launch('Music', ['https://music.youtube.com'])),
+        qa(Icons.apps, 'More', kLav, _more),
+      ]),
+      const SizedBox(height: 18),
+      // continue chat card
+      card(
+        Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Icon(Icons.auto_awesome, color: oc, size: 18),
+            const SizedBox(width: 8),
+            const Text('AI Chat', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+            const Spacer(),
+            const Icon(Icons.chevron_right, color: kMut),
+          ]),
+          const SizedBox(height: 4),
+          Text(
+            lastAi.isEmpty ? 'Naya chat shuru karo' : 'Continue your last conversation',
+            style: const TextStyle(color: kMut, fontSize: 12),
+          ),
+          if (lastAi.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Text(lastAi.last.text, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13)),
+          ],
+        ]),
+        border: oc.withOpacity(0.6),
+        onTap: () => S.goTab(1),
+      ),
       card(Row(children: [const Text('🎓', style: TextStyle(fontSize: 24)), const SizedBox(width: 12), Expanded(child: titled('English Teacher AI', 'Learn English · Speak · Improve · Interview'))]),
           onTap: () { S.mode = 'teacher'; S.send('Hello teacher, aaj ka English practice shuru karte hain.'); }),
-      const Padding(padding: EdgeInsets.fromLTRB(4, 14, 0, 8), child: Text('Quick Directives', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700))),
       Row(children: [
         Expanded(
           child: card(titled('✨ Deep Research', 'Kisi topic pe gehri research'), onTap: () async {
@@ -865,14 +1213,6 @@ class _HomeS extends State<HomeTab> with SingleTickerProviderStateMixin {
           }),
         ),
       ]),
-      card(
-        Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('NEURAL INSIGHT', style: TextStyle(color: Color(S.orb), fontSize: 11, fontWeight: FontWeight.w700)),
-          const SizedBox(height: 4),
-          Text(insights[DateTime.now().day % 3]),
-        ]),
-        border: const Color(0xFF5A1623),
-      ),
     ]);
   }
 }
@@ -895,7 +1235,7 @@ class _ChatS extends State<ChatTab> {
           margin: const EdgeInsets.symmetric(vertical: 5),
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: me ? const Color(0xFF2A0F16) : const Color(0xFF181822),
+            color: me ? const Color(0xFF2A1445) : const Color(0xFF181822),
             borderRadius: BorderRadius.circular(16),
             border: me ? null : Border.all(color: kLine),
           ),
@@ -1057,11 +1397,16 @@ Widget pgVoice() => Pg('Voice & AI Models', (c) => [
       ]),
       const SizedBox(height: 10),
       Field('Gemini model', S.mGemini, (v) { S.mGemini = v.trim(); S.save(notify: false); }),
+      Field('Gemini backup models (comma se) - limit khatam ho to ye chalenge', S.mGeminiFb, (v) { S.mGeminiFb = v.trim(); S.save(notify: false); }),
       Field('Grok model', S.mGrok, (v) { S.mGrok = v.trim(); S.save(notify: false); }),
     ]);
 
 Widget pgApi() => Pg('API & Cloud Settings', (c) => [
-      Field('Gemini API key (aistudio.google.com/apikey)', S.kGemini, (v) { S.kGemini = v.trim(); S.save(notify: false); }, obscure: true),
+      Field('Gemini API key(s) - kai keys ho to comma se alag karo', S.kGemini, (v) { S.kGemini = v.trim(); S.save(notify: false); }, obscure: true),
+      const Padding(
+        padding: EdgeInsets.only(bottom: 10),
+        child: Text('Free limit khatam ho to MYRA apne aap agli key / backup model par chali jaati hai. Alag Google accounts ki keys (aistudio.google.com/apikey) jodne se zyada chalega.', style: TextStyle(color: kMut, fontSize: 12)),
+      ),
       Field('Grok / xAI API key (console.x.ai)', S.kGrok, (v) { S.kGrok = v.trim(); S.save(notify: false); }, obscure: true),
       Field('ElevenLabs API key', S.kEleven, (v) { S.kEleven = v.trim(); S.save(notify: false); }, obscure: true),
       Field('Picovoice AccessKey (optional, abhi use nahi hoti)', S.kPico, (v) { S.kPico = v.trim(); S.save(notify: false); }, obscure: true),
@@ -1080,10 +1425,10 @@ Widget pgWake() => Pg('Wake Word', (c) => [
     ]);
 
 Widget pgOrb() => Pg('Orb Customization', (c) => [
-      Center(child: Container(width: 130, height: 130, decoration: BoxDecoration(shape: BoxShape.circle, gradient: RadialGradient(center: const Alignment(-0.3, -0.4), colors: [const Color(0xFFFFD0A0), Color(S.orb), const Color(0xFF2B0A14)], stops: const [0, 0.45, 1]), boxShadow: [BoxShadow(color: Color(S.orb), blurRadius: 30)]))),
+      Center(child: ParticleOrb(size: 150, color: Color(S.orb), active: true)),
       const SizedBox(height: 20),
       Wrap(spacing: 10, runSpacing: 10, children: [
-        for (final col in [0xFFE8182F, 0xFF00E5FF, 0xFF39FF14, 0xFFB44DFF, 0xFFFF9A1A])
+        for (final col in [0xFFB44DFF, 0xFFE8182F, 0xFF00E5FF, 0xFF39FF14, 0xFFFF9A1A])
           GestureDetector(onTap: () { S.orb = col; S.save(); }, child: CircleAvatar(radius: 24, backgroundColor: Color(col), child: S.orb == col ? const Icon(Icons.check, color: Colors.black) : null)),
       ]),
     ]);
@@ -1184,7 +1529,7 @@ Widget pgLauncher() => Pg('Launcher', (c) {
           ),
         ),
         sec('THEME'),
-        for (final t in const [['crimson', 'Crimson Core', 0xFFE8182F], ['cyan', 'Cyan Pulse', 0xFF00E5FF], ['matrix', 'Neon Matrix', 0xFF39FF14]])
+        for (final t in const [['purple', 'Violet Pulse', 0xFFB44DFF], ['crimson', 'Crimson Core', 0xFFE8182F], ['cyan', 'Cyan Pulse', 0xFF00E5FF], ['matrix', 'Neon Matrix', 0xFF39FF14]])
           card(Row(children: [CircleAvatar(radius: 14, backgroundColor: Color(t[2] as int)), const SizedBox(width: 12), Text('${t[1]}${S.theme == t[0] ? ' (current)' : ''}', style: const TextStyle(fontWeight: FontWeight.w700))]),
               onTap: () { S.theme = t[0] as String; S.orb = t[2] as int; S.save(); }),
         sec('DEFAULT HOME APP'),
