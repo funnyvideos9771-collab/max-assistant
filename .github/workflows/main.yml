@@ -36,7 +36,7 @@ jobs:
             fi
           done
 
-      - name: Add Android permissions
+      - name: Add Android permissions and overlay service
         run: |
           MANIFEST=android/app/src/main/AndroidManifest.xml
           sed -i '/<application/i \
@@ -48,9 +48,23 @@ jobs:
               <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>\
               <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>\
               <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>\
-              <queries><intent><action android:name="android.speech.RecognitionService"/></intent><intent><action android:name="android.intent.action.TTS_SERVICE"/></intent><intent><action android:name="android.intent.action.VIEW"/><data android:scheme="https"/></intent></queries>' $MANIFEST
+              <uses-permission android:name="android.permission.CALL_PHONE"/>\
+              <uses-permission android:name="com.android.alarm.permission.SET_ALARM"/>\
+              <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>\
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>\
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>\
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE"/>\
+              <queries><intent><action android:name="android.speech.RecognitionService"/></intent><intent><action android:name="android.intent.action.TTS_SERVICE"/></intent><intent><action android:name="android.intent.action.VIEW"/><data android:scheme="https"/></intent><intent><action android:name="android.intent.action.VIEW"/><data android:scheme="geo"/></intent><intent><action android:name="android.intent.action.VIEW"/><data android:scheme="tel"/></intent><intent><action android:name="android.intent.action.VIEW"/><data android:scheme="sms"/></intent><intent><action android:name="android.intent.action.VIEW"/><data android:scheme="vnd.youtube"/></intent><package android:name="com.whatsapp"/><package android:name="com.google.android.youtube"/><package android:name="com.google.android.apps.maps"/></queries>' $MANIFEST
+          sed -i 's#</application>#<service android:name="flutter.overlay.window.flutter_overlay_window.OverlayService" android:exported="false" android:foregroundServiceType="specialUse|microphone"><property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Floating voice assistant orb"/></service></application>#' $MANIFEST
+          cat $MANIFEST
 
       - run: flutter pub get
+
+      - name: Patch plugins compileSdk to 36
+        run: |
+          find "$HOME/.pub-cache" -path "*/android/build.gradle*" -type f | while read f; do
+            sed -i -E 's/compileSdk(Version)?[[:space:]]*=?[[:space:]]*[0-9]+/compileSdk = 36/g' "$f"
+          done
 
       - name: Build APK
         run: |
@@ -61,6 +75,7 @@ jobs:
         if: failure()
         run: |
           grep -n -A25 "What went wrong" build.log | head -60
+          grep -n -B2 -A6 "error:" build.log | head -60
 
       - uses: actions/upload-artifact@v4
         with:
