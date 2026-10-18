@@ -8,6 +8,7 @@ import 'package:android_intent_plus/android_intent.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_overlay_window/flutter_overlay_window.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
@@ -30,6 +31,8 @@ const kPurple = Color(0xFFB44DFF);
 const kLav = Color(0xFFB993FF);
 
 final msgKey = GlobalKey<ScaffoldMessengerState>();
+final navKey = GlobalKey<NavigatorState>();
+String _cn = '', _cp = '';
 void toast(String m) {
   final s = msgKey.currentState;
   if (s == null) return;
@@ -214,6 +217,8 @@ class AppState extends ChangeNotifier {
   String mGeminiFb = 'gemini-2.5-flash-lite,gemini-2.0-flash';
   String vidRobot = '21m00Tcm4TlvDq8ikWAM', vidCasual = 'EXAVITQu4vr4xnSDxMaL';
   bool speakOn = true, haptic = true, wakeOn = false;
+  bool orbOn = true, orbActive = false, appVisible = true, elevenDown = false;
+  Map<String, String> contacts = {};
   int orb = 0xFFB44DFF;
   String wakeWord = 'Myra';
   double wakeSens = 0.7;
@@ -236,6 +241,7 @@ class AppState extends ChangeNotifier {
         'speakOn': speakOn, 'haptic': haptic, 'wakeOn': wakeOn, 'orb': orb, 'wakeWord': wakeWord, 'wakeSens': wakeSens,
         'tgVoice': tgVoice, 'tgVib': tgVib, 'tgSiren': tgSiren, 'tgFull': tgFull, 'tgNotify': tgNotify, 'tgPhoto': tgPhoto,
         'tgSens': tgSens, 'tgPhone': tgPhone, 'tgVol': tgVol, 'photos': photos,
+        'orbOn': orbOn, 'contacts': contacts,
       };
 
   void fromMap(Map<String, dynamic> m) {
@@ -251,6 +257,8 @@ class AppState extends ChangeNotifier {
     tgFull = m['tgFull'] ?? tgFull; tgNotify = m['tgNotify'] ?? tgNotify; tgPhoto = m['tgPhoto'] ?? tgPhoto;
     tgSens = m['tgSens'] ?? tgSens; tgPhone = m['tgPhone'] ?? tgPhone; tgVol = (m['tgVol'] ?? tgVol).toDouble();
     photos = List<String>.from(m['photos'] ?? const []);
+    orbOn = m['orbOn'] ?? orbOn;
+    try { contacts = Map<String, String>.from(m['contacts'] ?? const {}); } catch (_) {}
   }
 
   Future<void> load() async {
@@ -285,30 +293,360 @@ class AppState extends ChangeNotifier {
   String sysPrompt() =>
       personas[persona]!.prompt.replaceAll('{name}', name) +
       (modePrompts[mode] ?? '') +
-      '\nToday is ${DateTime.now().toString().substring(0, 10)}.';
+      '\nToday is ${DateTime.now().toString().substring(0, 10)}.' +
+      _actPrompt;
 
-  // ── Voice commands that open apps (no AI needed) ──
+  static const _actPrompt = r'''
+PHONE ACTIONS: You control the user's phone through this app. When the user asks to play something on YouTube, call someone, WhatsApp or SMS someone, show a map or directions, search the web, open an app, or set an alarm/timer, NEVER say you cannot. Reply with ONE short friendly sentence and append exactly one tag at the very end, in one of these forms:
+[[ACT:{"a":"youtube","q":"song or video name"}]]
+[[ACT:{"a":"call","to":"contact name"}]]
+[[ACT:{"a":"whatsapp","to":"contact name","msg":"complete ready-to-send message"}]]
+[[ACT:{"a":"sms","to":"contact name","msg":"text"}]]
+[[ACT:{"a":"map","q":"place"}]]
+[[ACT:{"a":"nav","q":"destination"}]]
+[[ACT:{"a":"search","q":"query"}]]
+[[ACT:{"a":"open","q":"app name"}]]
+[[ACT:{"a":"alarm","h":6,"m":30}]]
+[[ACT:{"a":"timer","sec":300}]]
+For whatsapp/sms write the full message yourself using the earlier conversation (totals, amounts, items). Never mention the tag.''';
+
+  // ── Phone actions ──
+  String _num(String x) {
+    var d = x.replaceAll(RegExp(r'\D'), '');
+    if (d.length == 10) d = '91$d';
+    return d;
+  }
+
+  Future<String?> _numberFor(String name) async {
+    final raw = name.trim();
+    if (raw.replaceAll(RegExp(r'\D'), '').length >= 10) return _num(raw);
+    final low = raw.toLowerCase();
+    if (low.isEmpty) return null;
+    for (final e in contacts.entries) {
+      final k = e.key.toLowerCase();
+      if (k == low || k.contains(low) || low.contains(k)) return _num(e.value);
+    }
+    final ctx = navKey.currentContext;
+    if (ctx == null) return null;
+    final v = await askText(ctx, '$raw ka number daalo (jaise 9876543210)');
+    final d = (v ?? '').replaceAll(RegExp(r'\D'), '');
+    if (d.length < 10) return null;
+    contacts[raw] = d;
+    save();
+    return _num(d);
+  }
+
+  Future<bool> _intent(String action, {String? data, String? pkg, Map<String, dynamic>? args}) async {
+    try {
+      await AndroidIntent(action: action, data: data, package: pkg, arguments: args).launch();
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<String> playYoutube(String q) async {
+    if (q.isEmpty) return await openLink('vnd.youtube://') ? 'YouTube khol diya.' : 'YouTube nahi khul paya.';
+    String? id;
+    try {
+      final r = await http.get(
+        Uri.parse('https://www.youtube.com/results?search_query=${Uri.encodeQueryComponent(q)}&sp=EgIQAQ%3D%3D'),
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Mobile Safari/537.36',
+          'Accept-Language': 'en-IN,en;q=0.9',
+          'Cookie': 'CONSENT=YES+1',
+        },
+      ).timeout(const Duration(seconds: 8));
+      id = RegExp(r'"videoId":"([A-Za-z0-9_-]{11})"').firstMatch(r.body)?.group(1);
+    } catch (_) {}
+    if (id != null) {
+      if (await _intent('android.intent.action.VIEW', data: 'vnd.youtube:$id')) return '"$q" YouTube par chala diya.';
+      if (await openLink('https://www.youtube.com/watch?v=$id')) return '"$q" chala diya.';
+    }
+    if (await _intent('android.media.action.MEDIA_PLAY_FROM_SEARCH', pkg: 'com.google.android.youtube', args: {'query': q})) {
+      return '"$q" YouTube par chala rahi hu.';
+    }
+    return await openLink('https://www.youtube.com/results?search_query=${Uri.encodeQueryComponent(q)}')
+        ? 'YouTube par "$q" search kar diya.'
+        : 'YouTube nahi khul paya.';
+  }
+
+  Future<String> openApp(String n) async {
+    final t = n.toLowerCase();
+    const apps = <String, List<String>>{
+      'youtube': ['vnd.youtube://', 'https://www.youtube.com'],
+      'whatsapp': ['whatsapp://send', 'https://wa.me/'],
+      'instagram': ['instagram://app', 'https://instagram.com'],
+      'facebook': ['fb://feed', 'https://facebook.com'],
+      'telegram': ['tg://', 'https://t.me'],
+      'spotify': ['spotify://', 'https://open.spotify.com'],
+      'music': ['https://music.youtube.com'],
+      'maps': ['geo:0,0', 'https://maps.google.com'],
+      'chrome': ['googlechrome://', 'https://www.google.com'],
+      'gmail': ['googlegmail://', 'https://mail.google.com'],
+      'snapchat': ['snapchat://', 'https://snapchat.com'],
+    };
+    for (final e in apps.entries) {
+      if (t.contains(e.key)) {
+        for (final u in e.value) {
+          if (await openLink(u)) return '${e.key} khol diya.';
+        }
+        return '${e.key} nahi khul paya.';
+      }
+    }
+    if (t.contains('camera')) return await openCamera() ? 'Camera khol diya.' : 'Camera nahi khula.';
+    if (t.contains('wifi')) return await _intent('android.settings.WIFI_SETTINGS') ? 'WiFi settings khol di.' : 'Nahi khula.';
+    if (t.contains('bluetooth')) return await _intent('android.settings.BLUETOOTH_SETTINGS') ? 'Bluetooth settings khol di.' : 'Nahi khula.';
+    if (t.contains('setting')) return await _intent('android.settings.SETTINGS') ? 'Settings khol di.' : 'Nahi khula.';
+    if (t.contains('dialer') || t.contains('phone')) return await openDialer() ? 'Dialer khol diya.' : 'Nahi khula.';
+    return '"$n" app nahi mila.';
+  }
+
+  Future<String> doAct(Map<String, dynamic> a) async {
+    final t = (a['a'] ?? '').toString().toLowerCase();
+    final q = (a['q'] ?? '').toString().trim();
+    final to = (a['to'] ?? '').toString().trim();
+    final msg = (a['msg'] ?? '').toString().trim();
+    switch (t) {
+      case 'youtube':
+        return playYoutube(q);
+      case 'call':
+        {
+          final who = to.isEmpty ? q : to;
+          if (who.isEmpty) return await openDialer() ? 'Dialer khol diya.' : 'Dialer nahi khula.';
+          final n = await _numberFor(who);
+          if (n == null) return '$who ka number nahi mila. Settings > Contacts me jodo.';
+          final st = await Permission.phone.request();
+          if (st.isGranted && await _intent('android.intent.action.CALL', data: 'tel:+$n')) return '$who ko call laga rahi hu.';
+          await _intent('android.intent.action.DIAL', data: 'tel:+$n');
+          return 'Number dialer me daal diya, call button dabao.';
+        }
+      case 'whatsapp':
+        {
+          final n = await _numberFor(to);
+          if (n == null) return '${to.isEmpty ? 'Contact' : to} ka number nahi mila. Settings > Contacts me jodo.';
+          final ok = await openLink('https://wa.me/$n${msg.isEmpty ? '' : '?text=${Uri.encodeComponent(msg)}'}');
+          if (!ok) return 'WhatsApp nahi khul paya.';
+          return msg.isEmpty ? '$to ki WhatsApp chat khol di.' : 'Message ready hai, WhatsApp me bas Send dabao.';
+        }
+      case 'sms':
+        {
+          final n = await _numberFor(to);
+          if (n == null) return '${to.isEmpty ? 'Contact' : to} ka number nahi mila.';
+          final ok = await openLink('sms:+$n?body=${Uri.encodeComponent(msg)}');
+          return ok ? 'SMS ready hai, Send dabao.' : 'SMS app nahi khula.';
+        }
+      case 'map':
+        {
+          if (q.isEmpty) return openApp('maps');
+          final e = Uri.encodeComponent(q);
+          if (await _intent('android.intent.action.VIEW', data: 'geo:0,0?q=$e', pkg: 'com.google.android.apps.maps')) return '$q map par dikha diya.';
+          return await openLink('https://www.google.com/maps/search/?api=1&query=$e') ? '$q map par dikha diya.' : 'Maps nahi khula.';
+        }
+      case 'nav':
+        {
+          if (q.isEmpty) return openApp('maps');
+          final e = Uri.encodeComponent(q);
+          if (await _intent('android.intent.action.VIEW', data: 'google.navigation:q=$e', pkg: 'com.google.android.apps.maps')) return '$q ka rasta shuru kar diya.';
+          return await openLink('https://www.google.com/maps/dir/?api=1&destination=$e') ? '$q ka rasta khol diya.' : 'Maps nahi khula.';
+        }
+      case 'search':
+        return await openLink('https://www.google.com/search?q=${Uri.encodeQueryComponent(q)}') ? '"$q" search kar diya.' : 'Browser nahi khula.';
+      case 'open':
+        return openApp(q);
+      case 'alarm':
+        {
+          final h = int.tryParse('${a['h']}'), m = int.tryParse('${a['m']}') ?? 0;
+          if (h == null) return 'Alarm ka time samajh nahi aaya.';
+          final ok = await _intent('android.intent.action.SET_ALARM', args: {
+            'android.intent.extra.alarm.HOUR': h,
+            'android.intent.extra.alarm.MINUTES': m,
+            'android.intent.extra.alarm.SKIP_UI': true,
+          });
+          return ok ? 'Alarm ${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')} par laga diya.' : 'Alarm nahi laga paya.';
+        }
+      case 'timer':
+        {
+          final sec = int.tryParse('${a['sec']}');
+          if (sec == null) return 'Timer samajh nahi aaya.';
+          final ok = await _intent('android.intent.action.SET_TIMER', args: {'android.intent.extra.alarm.LENGTH': sec, 'android.intent.extra.alarm.SKIP_UI': true});
+          return ok ? 'Timer laga diya.' : 'Timer nahi laga paya.';
+        }
+    }
+    return 'Ye kaam abhi nahi kar sakti.';
+  }
+
+  // quick offline commands (no AI call); messaging goes to AI so it can write the message
   Future<String?> localCommand(String raw) async {
-    final t = raw.toLowerCase();
+    final t = raw.toLowerCase().trim();
     bool has(List<String> w) => w.any((x) => t.contains(x));
-    final wantsCall = has(['call', 'dial', 'कॉल', 'डायल']) && has(['karo', 'lagao', 'laga', 'open', 'kholo', 'करो', 'लगाओ', 'खोलो']);
-    if (wantsCall) {
-      return await openDialer() ? 'Dialer khol diya.' : 'Dialer nahi khul paya.';
+    const stop = <String>{
+      'please', 'plz', 'mera', 'meri', 'mujhe', 'ek', 'ye', 'yeh', 'wala', 'wali', 'ka', 'ki', 'ke', 'ko', 'pe', 'par', 'per', 'me', 'mein',
+      'में', 'पर', 'पे', 'karo', 'kar', 'do', 'de', 'dena', 'chalao', 'chala', 'bajao', 'baja', 'laga', 'lagao', 'play', 'search', 'dhundo',
+      'khojo', 'video', 'song', 'gaana', 'gana', 'youtube', 'yt', 'यूट्यूब', 'sunao', 'suna', 'dikhao', 'dikha', 'kholo', 'khol', 'open',
+      'करो', 'दो', 'चलाओ', 'बजाओ', 'लगाओ', 'प्ले', 'गाना', 'वीडियो', 'na', 'zara', 'thoda', 'aur', 'hai', 'mere',
+    };
+    String clean([List<String> extra = const []]) =>
+        t.split(RegExp(r'\s+')).where((w) => !stop.contains(w) && !extra.contains(w)).join(' ').trim();
+
+    final messaging = has(['whatsapp', 'व्हाट्सएप', 'वाट्सएप', 'sms', 'message', 'msg', 'मैसेज']) &&
+        (t.contains(' ko ') || t.contains(' को ') || has(['bhej', 'likh', 'send', 'message', 'msg', 'sms', 'मैसेज']));
+    if (messaging) return null;
+
+    if (has(['time kya', 'kitne baje', 'samay kya', 'what time', 'टाइम क्या', 'कितने बजे'])) {
+      final n = DateTime.now();
+      return 'Abhi ${n.hour.toString().padLeft(2, '0')}:${n.minute.toString().padLeft(2, '0')} baj rahe hain.';
+    }
+    if (has(['alarm', 'अलार्म'])) {
+      final m = RegExp(r'(\d{1,2})(?:[:.](\d{2}))?').firstMatch(t);
+      if (m != null) {
+        var h = int.parse(m.group(1)!);
+        final mi = int.tryParse(m.group(2) ?? '0') ?? 0;
+        if (h < 12 && has(['pm', 'shaam', 'sham', 'raat', 'dopahar', 'शाम', 'रात'])) h += 12;
+        return doAct({'a': 'alarm', 'h': h, 'm': mi});
+      }
+      return null;
+    }
+    if (has(['timer', 'टाइमर'])) {
+      final m = RegExp(r'(\d+)\s*(min|minute|मिनट|sec|second|सेकंड)?').firstMatch(t);
+      if (m != null) {
+        final v = int.parse(m.group(1)!);
+        final u = m.group(2) ?? 'min';
+        return doAct({'a': 'timer', 'sec': u.startsWith('s') || u == 'सेकंड' ? v : v * 60});
+      }
+      return null;
+    }
+    final yt = has(['youtube', 'यूट्यूब', 'यूटयूब']);
+    final playVerb = has(['play', 'chalao', 'chala do', 'bajao', 'baja do', 'laga do', 'lagao', 'sunao', 'suna do', 'dikhao', 'चला', 'बजा', 'लगा', 'सुना', 'प्ले']);
+    final media = has(['song', 'gana', 'gaana', 'video', 'गाना', 'वीडियो']);
+    if ((yt && (playVerb || has(['search', 'dhundo', 'khojo', 'kholo', 'open', 'खोल']))) || (playVerb && media) || t.startsWith('play ')) {
+      return doAct({'a': 'youtube', 'q': clean()});
+    }
+    if (has(['call', 'dial', 'phone lagao', 'कॉल', 'फोन लगा', 'फ़ोन लगा'])) {
+      final who = clean(['call', 'dial', 'phone', 'कॉल', 'फोन', 'number']);
+      return doAct({'a': 'call', 'to': who});
+    }
+    final nav = has(['rasta', 'route', 'navigate', 'navigation', 'directions', 'le chalo', 'le chal', 'jana hai', 'kaise jaun', 'रास्ता', 'नेविगेट', 'ले चलो']);
+    final mapw = has(['map', 'maps', 'मैप', 'kahan hai', 'nearby', 'paas me', 'पास']);
+    if (nav || mapw) {
+      final q = clean(['map', 'maps', 'rasta', 'route', 'navigate', 'navigation', 'directions', 'le', 'chalo', 'chal', 'jana', 'kaise', 'jaun', 'nearby', 'kahan', 'paas', 'tak', 'मैप', 'रास्ता', 'नेविगेट', 'ले', 'चलो']);
+      return doAct({'a': nav ? 'nav' : 'map', 'q': q});
+    }
+    if (has(['google pe', 'google par', 'google search', 'गूगल'])) {
+      final q = clean(['google', 'गूगल']);
+      if (q.isNotEmpty) return doAct({'a': 'search', 'q': q});
     }
     final openVerb = has(['kholo', 'khol do', 'khol', 'open', 'chalao', 'chala do', 'launch', 'खोलो', 'खोल', 'चलाओ']);
-    if (!openVerb) return null;
-    Future<String> go(String nm, List<String> urls) async {
-      for (final u in urls) {
-        if (await openLink(u)) return '$nm khol diya.';
+    if (openVerb) {
+      const hi = {'यूट्यूब': 'youtube', 'व्हाट्सएप': 'whatsapp', 'वाट्सएप': 'whatsapp', 'कैमरा': 'camera', 'म्यूजिक': 'music', 'गाना': 'music', 'gana': 'music', 'gaana': 'music'};
+      var name = t;
+      hi.forEach((k, v) => name = name.replaceAll(k, v));
+      for (final k in ['youtube', 'whatsapp', 'instagram', 'facebook', 'telegram', 'spotify', 'music', 'chrome', 'gmail', 'snapchat', 'camera', 'wifi', 'bluetooth', 'setting', 'dialer']) {
+        if (name.contains(k)) return openApp(k);
       }
-      return '$nm nahi khul paya.';
     }
-    if (has(['youtube', 'यूट्यूब', 'यूटयूब'])) return go('YouTube', ['vnd.youtube://', 'https://www.youtube.com']);
-    if (has(['whatsapp', 'व्हाट्सएप', 'व्हाट्सऐप', 'वाट्सएप'])) return go('WhatsApp', ['whatsapp://send', 'https://wa.me/']);
-    if (has(['music', 'gaana', 'gana', 'spotify', 'म्यूजिक', 'गाना'])) return go('Music', ['https://music.youtube.com']);
-    if (has(['maps', 'map', 'मैप'])) return go('Maps', ['https://maps.google.com']);
-    if (has(['camera', 'कैमरा'])) return await openCamera() ? 'Camera khol diya.' : 'Camera nahi khul paya.';
     return null;
+  }
+
+  // ── Floating orb (works over other apps) ──
+  StreamSubscription? _ovSub;
+  String _lastOrb = '';
+
+  @override
+  void notifyListeners() {
+    super.notifyListeners();
+    if (orbActive) {
+      final st = listening ? 'l' : (busy ? 'b' : 'i');
+      final key = '$st${orb}';
+      if (key != _lastOrb) {
+        _lastOrb = key;
+        try { FlutterOverlayWindow.shareData({'st': st, 'c': orb}); } catch (_) {}
+      }
+    }
+  }
+
+  void initOrb() {
+    _ovSub?.cancel();
+    try {
+      _ovSub = FlutterOverlayWindow.overlayListener.listen((e) {
+        final m = e.toString();
+        if (m == 'listen') {
+          listenOnce((t) => send(t));
+        } else if (m == 'close') {
+          orbOn = false;
+          save();
+          stopOrb();
+        }
+      });
+    } catch (_) {}
+  }
+
+  Future<bool> orbPermission({bool ask = false}) async {
+    try {
+      if (await FlutterOverlayWindow.isPermissionGranted()) return true;
+      if (ask) return (await FlutterOverlayWindow.requestPermission()) == true;
+    } catch (_) {}
+    return false;
+  }
+
+  Future<void> startOrb({bool ask = false}) async {
+    if (!orbOn) return;
+    try {
+      if (!await orbPermission(ask: ask)) return;
+      if (!(await Permission.microphone.status).isGranted) {
+        if (!(await Permission.microphone.request()).isGranted) return;
+      }
+      await Permission.notification.request();
+      if (!await FlutterOverlayWindow.isActive()) {
+        await FlutterOverlayWindow.showOverlay(
+          enableDrag: true,
+          overlayTitle: 'MYRA',
+          overlayContent: 'MYRA sun rahi hai',
+          flag: OverlayFlag.defaultFlag,
+          alignment: OverlayAlignment.centerRight,
+          visibility: NotificationVisibility.visibilityPublic,
+          positionGravity: PositionGravity.auto,
+          height: 260,
+          width: 220,
+        );
+      }
+      orbActive = true;
+      if (appVisible) { orbHide(); } else { orbShow(); }
+    } catch (e) {
+      toast('Orb nahi chala: $e');
+    }
+  }
+
+  Future<void> orbShow() async {
+    try {
+      await FlutterOverlayWindow.resizeOverlay(220, 260, true);
+      await FlutterOverlayWindow.shareData({'vis': true, 'c': orb});
+    } catch (_) {}
+  }
+
+  Future<void> orbHide() async {
+    try {
+      await FlutterOverlayWindow.shareData({'vis': false});
+      await FlutterOverlayWindow.resizeOverlay(1, 1, false);
+    } catch (_) {}
+  }
+
+  Future<void> stopOrb() async {
+    try {
+      if (await FlutterOverlayWindow.isActive()) await FlutterOverlayWindow.closeOverlay();
+    } catch (_) {}
+    orbActive = false;
+    notifyListeners();
+  }
+
+  void onLifecycle(AppLifecycleState st) {
+    if (st == AppLifecycleState.resumed) {
+      appVisible = true;
+      if (orbActive) { orbHide(); } else if (orbOn) { startOrb(); }
+    } else if (st == AppLifecycleState.paused) {
+      appVisible = false;
+      if (orbActive) orbShow();
+    }
   }
 
   // ── AI ──
@@ -434,11 +772,21 @@ class AppState extends ChangeNotifier {
         saveMem();
         speak(lc);
       } else {
-        final a = await askAI(text.isEmpty ? 'Is image me kya hai?' : text, img);
+        var a = await askAI(text.isEmpty ? 'Is image me kya hai?' : text, img);
+        String? res;
+        final am = RegExp(r'\[\[ACT:(.*?)\]\]', dotAll: true).firstMatch(a);
+        if (am != null) {
+          a = a.replaceAll(am.group(0)!, '').trim();
+          try {
+            res = await doAct(Map<String, dynamic>.from(jsonDecode(am.group(1)!.trim())));
+          } catch (_) {}
+        }
+        a = a.replaceAll(RegExp(r'\[\[ACT:.*', dotAll: true), '').trim();
+        final shown = res == null ? a : (a.isEmpty ? res : '$a\n\n✅ $res');
         final t = DateTime.now().millisecondsSinceEpoch;
-        mem.add(Mem(t, t, 'assistant', a));
+        mem.add(Mem(t, t, 'assistant', shown.isEmpty ? '(done)' : shown));
         saveMem();
-        speak(a);
+        speak(a.isEmpty ? (res ?? '') : a);
       }
     } catch (e) {
       toast(e.toString().replaceFirst('Exception: ', ''));
@@ -459,25 +807,26 @@ class AppState extends ChangeNotifier {
     var clean = text.replaceAll(RegExp(r'[*_`#]'), '');
     if (clean.length > 900) clean = clean.substring(0, 900);
     final pr = personas[persona]!;
-    if (tts == 'eleven' && kEleven.isNotEmpty) {
+    if (tts == 'eleven' && kEleven.isNotEmpty && !elevenDown) {
       try {
         final r = await http.post(
           Uri.parse('https://api.elevenlabs.io/v1/text-to-speech/${persona == 'robot' ? vidRobot : vidCasual}'),
           headers: {'xi-api-key': kEleven, 'Content-Type': 'application/json', 'Accept': 'audio/mpeg'},
           body: jsonEncode({
-            'text': clean,
+            'text': clean.length > 400 ? clean.substring(0, 400) : clean,
             'model_id': 'eleven_multilingual_v2',
             'voice_settings': {'stability': pr.stab, 'similarity_boost': pr.sim, 'style': pr.style},
           }),
         );
         if (r.statusCode != 200) {
+          if (r.statusCode == 401 || r.statusCode == 429 || r.body.contains('quota')) elevenDown = true;
           throw Exception('ElevenLabs ${r.statusCode}: ${r.body.substring(0, min(120, r.body.length))}');
         }
         await _player.setVolume(1);
         await _player.play(BytesSource(r.bodyBytes));
         return;
       } catch (e) {
-        toast('$e - device voice use kar raha hu');
+        toast(elevenDown ? 'ElevenLabs limit khatam ya key permission nahi - ab phone voice use hogi' : '$e - phone voice use kar rahi hu');
       }
     }
     await _tts.setLanguage(lang);
@@ -671,7 +1020,110 @@ final S = AppState();
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await S.load();
+  S.initOrb();
+  WidgetsBinding.instance.addObserver(_Life());
   runApp(const MyraApp());
+}
+
+class _Life with WidgetsBindingObserver {
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) => S.onLifecycle(state);
+}
+
+// overlay entry point (the floating orb shown over other apps)
+@pragma('vm:entry-point')
+void overlayMain() {
+  runApp(const MaterialApp(debugShowCheckedModeBanner: false, home: OrbOverlay()));
+}
+
+class OrbOverlay extends StatefulWidget {
+  const OrbOverlay({super.key});
+  @override
+  State<OrbOverlay> createState() => _OrbOverlayS();
+}
+
+class _OrbOverlayS extends State<OrbOverlay> with SingleTickerProviderStateMixin {
+  late final AnimationController c = AnimationController(vsync: this, duration: const Duration(milliseconds: 1400))..repeat();
+  String st = 'i';
+  bool vis = true;
+  Color col = kPurple;
+  StreamSubscription? sub;
+
+  @override
+  void initState() {
+    super.initState();
+    sub = FlutterOverlayWindow.overlayListener.listen((e) {
+      if (e is Map && mounted) {
+        setState(() {
+          if (e['vis'] != null) vis = e['vis'] == true;
+          if (e['st'] != null) st = e['st'].toString();
+          if (e['c'] != null) col = Color((e['c'] as num).toInt());
+        });
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    sub?.cancel();
+    c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!vis) return const SizedBox.shrink();
+    final label = st == 'l' ? 'Sun rahi hu...' : (st == 'b' ? 'Soch rahi hu...' : 'Tap karke bolo');
+    return Material(
+      color: Colors.transparent,
+      child: Center(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Stack(clipBehavior: Clip.none, alignment: Alignment.center, children: [
+            GestureDetector(
+              onTap: () => FlutterOverlayWindow.shareData('listen'),
+              child: AnimatedBuilder(
+                animation: c,
+                builder: (_, __) {
+                  final ring = st == 'l' ? c.value : 0.0;
+                  return Container(
+                    width: 100, height: 100, alignment: Alignment.center,
+                    child: Stack(alignment: Alignment.center, children: [
+                      if (st == 'l')
+                        Container(
+                          width: 70 + 30 * ring, height: 70 + 30 * ring,
+                          decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: col.withOpacity(1 - ring), width: 2)),
+                        ),
+                      Container(
+                        width: 66, height: 66,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          gradient: RadialGradient(center: const Alignment(-0.3, -0.4), colors: [const Color(0xFFFFE0F0), col, const Color(0xFF1A0830)], stops: const [0, 0.45, 1]),
+                          boxShadow: [BoxShadow(color: col, blurRadius: st == 'i' ? 14 : 26)],
+                        ),
+                      ),
+                    ]),
+                  );
+                },
+              ),
+            ),
+            Positioned(
+              top: 0, right: 4,
+              child: GestureDetector(
+                onTap: () => FlutterOverlayWindow.shareData('close'),
+                child: Container(
+                  width: 22, height: 22,
+                  decoration: const BoxDecoration(shape: BoxShape.circle, color: Color(0xCC000000)),
+                  child: const Icon(Icons.close, size: 14, color: Colors.white),
+                ),
+              ),
+            ),
+          ]),
+          const SizedBox(height: 4),
+          Text(label, style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600, shadows: [Shadow(color: Colors.black, blurRadius: 6)])),
+        ]),
+      ),
+    );
+  }
 }
 
 class MyraApp extends StatelessWidget {
@@ -684,6 +1136,7 @@ class MyraApp extends StatelessWidget {
         title: 'MYRA',
         debugShowCheckedModeBanner: false,
         scaffoldMessengerKey: msgKey,
+        navigatorKey: navKey,
         theme: ThemeData.dark(useMaterial3: true).copyWith(
           scaffoldBackgroundColor: kBg,
           colorScheme: ColorScheme.dark(primary: Color(S.orb)),
@@ -713,6 +1166,11 @@ class _RootS extends State<Root> with SingleTickerProviderStateMixin {
       if (mounted) setState(() => splash = false);
     });
     if (S.wakeOn) Future.delayed(const Duration(seconds: 3), S.startWake);
+    Future.delayed(const Duration(seconds: 3), () async {
+      final asked = S.p.getBool('orbAsked') == true;
+      await S.startOrb(ask: !asked);
+      await S.p.setBool('orbAsked', true);
+    });
   }
 
   @override
@@ -1318,6 +1776,9 @@ Widget triggersTab(BuildContext context) => ListView(padding: const EdgeInsets.a
       }),
       toggle('Touch Guard', 'Phone uthane par alarm + photo + alert', S.tgArmed, (v) => v ? S.arm() : S.disarm()),
       toggle('Speak replies', 'MYRA jawab bolkar sunaye', S.speakOn, (v) { S.speakOn = v; S.save(); }),
+      toggle('Floating Orb', 'App se bahar (YouTube wagairah par) bhi orb dikhe, tap karke bolo', S.orbOn, (v) {
+        S.orbOn = v; S.save(); v ? S.startOrb(ask: true) : S.stopOrb();
+      }),
       sec('MODE'),
       Wrap(spacing: 8, children: [
         chip('Normal', S.mode == 'normal', () { S.mode = 'normal'; S.notifyListeners(); }),
@@ -1340,6 +1801,7 @@ Widget settingsTab(BuildContext context) => ListView(padding: const EdgeInsets.a
       tile('🗣', 'Wake Word', 'Customize how you start MYRA', () => open(context, pgWake())),
       tile('🎨', 'Orb Customization', 'Orb ka color', () => open(context, pgOrb())),
       sec('CORE INTERACTION'),
+      tile('📇', 'Contacts', 'Call / WhatsApp ke liye naam aur number', () => open(context, pgContacts())),
       tile('🧠', 'MYRA Memory', 'Everything MYRA remembers, day by day', () => open(context, pgMemory())),
       tile('🌐', 'Language', 'Current: ${S.lang}', () => open(context, pgLang())),
       toggle('Haptic Feedback', 'Somatic vibrations', S.haptic, (v) { S.haptic = v; S.save(); }),
@@ -1401,6 +1863,26 @@ Widget pgVoice() => Pg('Voice & AI Models', (c) => [
       Field('Grok model', S.mGrok, (v) { S.mGrok = v.trim(); S.save(notify: false); }),
     ]);
 
+Widget pgContacts() => Pg('Contacts', (c) => [
+      const Text('Yaha naam + number save karo. Phir bolo: "Rahul ko call karo" ya "Rahul ko WhatsApp karo ki main late hu". Naya naam bologi to MYRA khud number puchh legi.', style: TextStyle(color: kMut, fontSize: 13)),
+      const SizedBox(height: 12),
+      for (final e in S.contacts.entries)
+        card(Row(children: [
+          Expanded(child: titled(e.key, e.value)),
+          InkWell(onTap: () { S.contacts.remove(e.key); S.save(); }, child: const Icon(Icons.delete_outline, color: kMut)),
+        ])),
+      sec('NAYA CONTACT'),
+      Field('Naam (jaise Shaktinath)', '', (v) => _cn = v, key: ValueKey('n${S.contacts.length}')),
+      Field('Number (jaise 9876543210)', '', (v) => _cp = v, kt: TextInputType.phone, key: ValueKey('p${S.contacts.length}')),
+      btn('Save', () {
+        if (_cn.trim().isEmpty || _cp.replaceAll(RegExp(r'\D'), '').length < 10) { toast('Naam aur 10 digit number daalo'); return; }
+        S.contacts[_cn.trim()] = _cp.trim();
+        _cn = ''; _cp = '';
+        S.save();
+        toast('Save ho gaya');
+      }),
+    ]);
+
 Widget pgApi() => Pg('API & Cloud Settings', (c) => [
       Field('Gemini API key(s) - kai keys ho to comma se alag karo', S.kGemini, (v) { S.kGemini = v.trim(); S.save(notify: false); }, obscure: true),
       const Padding(
@@ -1408,7 +1890,7 @@ Widget pgApi() => Pg('API & Cloud Settings', (c) => [
         child: Text('Free limit khatam ho to MYRA apne aap agli key / backup model par chali jaati hai. Alag Google accounts ki keys (aistudio.google.com/apikey) jodne se zyada chalega.', style: TextStyle(color: kMut, fontSize: 12)),
       ),
       Field('Grok / xAI API key (console.x.ai)', S.kGrok, (v) { S.kGrok = v.trim(); S.save(notify: false); }, obscure: true),
-      Field('ElevenLabs API key', S.kEleven, (v) { S.kEleven = v.trim(); S.save(notify: false); }, obscure: true),
+      Field('ElevenLabs API key', S.kEleven, (v) { S.kEleven = v.trim(); S.elevenDown = false; S.save(notify: false); }, obscure: true),
       Field('Picovoice AccessKey (optional, abhi use nahi hoti)', S.kPico, (v) { S.kPico = v.trim(); S.save(notify: false); }, obscure: true),
       btn('Test AI connection', () { S.mem.clear(); S.send('Bas "ok" bolo.'); }),
       const Text('Keys sirf is phone me save hoti hain. Kisi ko share mat karo.', style: TextStyle(color: kMut, fontSize: 12)),
