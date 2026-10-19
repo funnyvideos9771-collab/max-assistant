@@ -217,7 +217,7 @@ class AppState extends ChangeNotifier {
   String mGeminiFb = 'gemini-2.5-flash-lite,gemini-2.0-flash';
   String vidRobot = '21m00Tcm4TlvDq8ikWAM', vidCasual = 'EXAVITQu4vr4xnSDxMaL';
   bool speakOn = true, haptic = true, wakeOn = false;
-  bool orbOn = true, orbActive = false, appVisible = true, elevenDown = false;
+  bool orbOn = false, orbActive = false, appVisible = true, elevenDown = false, _orbBusy = false;
   Map<String, String> contacts = {};
   int orb = 0xFFB44DFF;
   String wakeWord = 'Myra';
@@ -270,6 +270,11 @@ class AppState extends ChangeNotifier {
     final mj = p.getString('mem');
     if (mj != null) {
       try { mem = (jsonDecode(mj) as List).map((e) => Mem.from(Map<String, dynamic>.from(e))).toList(); } catch (_) {}
+    }
+    if (p.getBool('ui3') != true) {
+      orbOn = false;
+      await p.setBool('ui3', true);
+      save(notify: false);
     }
     // one-time switch to the new purple look
     if (p.getBool('ui2') != true) {
@@ -590,13 +595,14 @@ For whatsapp/sms write the full message yourself using the earlier conversation 
   }
 
   Future<void> startOrb({bool ask = false}) async {
-    if (!orbOn) return;
+    if (!orbOn || _orbBusy) return;
+    _orbBusy = true;
     try {
       if (!await orbPermission(ask: ask)) return;
       if (!(await Permission.microphone.status).isGranted) {
-        if (!(await Permission.microphone.request()).isGranted) return;
+        if (!ask || !(await Permission.microphone.request()).isGranted) return;
       }
-      await Permission.notification.request();
+      if (ask) await Permission.notification.request();
       if (!await FlutterOverlayWindow.isActive()) {
         await FlutterOverlayWindow.showOverlay(
           enableDrag: true,
@@ -614,6 +620,8 @@ For whatsapp/sms write the full message yourself using the earlier conversation 
       if (appVisible) { orbHide(); } else { orbShow(); }
     } catch (e) {
       toast('Orb nahi chala: $e');
+    } finally {
+      _orbBusy = false;
     }
   }
 
@@ -642,7 +650,7 @@ For whatsapp/sms write the full message yourself using the earlier conversation 
   void onLifecycle(AppLifecycleState st) {
     if (st == AppLifecycleState.resumed) {
       appVisible = true;
-      if (orbActive) { orbHide(); } else if (orbOn) { startOrb(); }
+      if (orbActive) orbHide();
     } else if (st == AppLifecycleState.paused) {
       appVisible = false;
       if (orbActive) orbShow();
@@ -1017,12 +1025,30 @@ For whatsapp/sms write the full message yourself using the earlier conversation 
 final S = AppState();
 
 // ───────────────────────── entry ─────────────────────────
+String startErr = '';
+
 Future<void> main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-  await S.load();
-  S.initOrb();
-  WidgetsBinding.instance.addObserver(_Life());
-  runApp(const MyraApp());
+  runZonedGuarded(() async {
+    WidgetsFlutterBinding.ensureInitialized();
+    ErrorWidget.builder = (d) => Material(
+          color: const Color(0xFF2A0008),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(16),
+            child: SafeArea(child: Text('ERROR (screenshot bhejo):\n${d.exceptionAsString()}', style: const TextStyle(color: Colors.white, fontSize: 12))),
+          ),
+        );
+    try {
+      await S.load();
+    } catch (e) {
+      startErr = 'load: $e';
+    }
+    try {
+      WidgetsBinding.instance.addObserver(_Life());
+    } catch (_) {}
+    runApp(const MyraApp());
+  }, (e, st) {
+    startErr = '$e';
+  });
 }
 
 class _Life with WidgetsBindingObserver {
@@ -1166,11 +1192,12 @@ class _RootS extends State<Root> with SingleTickerProviderStateMixin {
       if (mounted) setState(() => splash = false);
     });
     if (S.wakeOn) Future.delayed(const Duration(seconds: 3), S.startWake);
-    Future.delayed(const Duration(seconds: 3), () async {
-      final asked = S.p.getBool('orbAsked') == true;
-      await S.startOrb(ask: !asked);
-      await S.p.setBool('orbAsked', true);
-    });
+    if (S.orbOn) {
+      Future.delayed(const Duration(seconds: 4), () async {
+        S.initOrb();
+        await S.startOrb();
+      });
+    }
   }
 
   @override
@@ -1215,7 +1242,18 @@ class _RootS extends State<Root> with SingleTickerProviderStateMixin {
         },
       );
     }
-    return const Shell();
+    if (startErr.isEmpty) return const Shell();
+    return Stack(children: [
+      const Shell(),
+      Positioned(
+        left: 8, right: 8, top: 40,
+        child: Material(
+          color: const Color(0xEE2A0008),
+          borderRadius: BorderRadius.circular(8),
+          child: Padding(padding: const EdgeInsets.all(8), child: Text('Error: $startErr', style: const TextStyle(color: Colors.white, fontSize: 11))),
+        ),
+      ),
+    ]);
   }
 }
 
@@ -1777,7 +1815,7 @@ Widget triggersTab(BuildContext context) => ListView(padding: const EdgeInsets.a
       toggle('Touch Guard', 'Phone uthane par alarm + photo + alert', S.tgArmed, (v) => v ? S.arm() : S.disarm()),
       toggle('Speak replies', 'MYRA jawab bolkar sunaye', S.speakOn, (v) { S.speakOn = v; S.save(); }),
       toggle('Floating Orb', 'App se bahar (YouTube wagairah par) bhi orb dikhe, tap karke bolo', S.orbOn, (v) {
-        S.orbOn = v; S.save(); v ? S.startOrb(ask: true) : S.stopOrb();
+        S.orbOn = v; S.save(); if (v) { S.initOrb(); S.startOrb(ask: true); } else { S.stopOrb(); }
       }),
       sec('MODE'),
       Wrap(spacing: 8, children: [
