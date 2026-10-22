@@ -10,7 +10,6 @@ dependencies:
   flutter:
     sdk: flutter
   http: ^1.2.2
-  shared_preferences: ^2.3.2
   speech_to_text: ^7.0.0
   flutter_tts: ^4.0.2
   audioplayers: ^6.1.0
