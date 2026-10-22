@@ -16,7 +16,6 @@ import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:sensors_plus/sensors_plus.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:vibration/vibration.dart';
@@ -207,8 +206,37 @@ class _OrbPainter extends CustomPainter {
 }
 
 // ───────────────────────── app state / engine ─────────────────────────
+// simple file-based storage (replaces shared_preferences plugin)
+class Prefs {
+  final File _f;
+  final Map<String, dynamic> _m;
+  Prefs._(this._f, this._m);
+
+  static Future<Prefs> open() async {
+    final d = await getApplicationDocumentsDirectory();
+    final f = File('${d.path}/myra_prefs.json');
+    var m = <String, dynamic>{};
+    try {
+      if (await f.exists()) m = Map<String, dynamic>.from(jsonDecode(await f.readAsString()));
+    } catch (_) {}
+    return Prefs._(f, m);
+  }
+
+  String? getString(String k) => _m[k] is String ? _m[k] as String : null;
+  bool? getBool(String k) => _m[k] is bool ? _m[k] as bool : null;
+
+  Future<void> setString(String k, String v) { _m[k] = v; return _flush(); }
+  Future<void> setBool(String k, bool v) { _m[k] = v; return _flush(); }
+
+  Future<void> _flush() async {
+    try {
+      await _f.writeAsString(jsonEncode(_m), flush: true);
+    } catch (_) {}
+  }
+}
+
 class AppState extends ChangeNotifier {
-  late SharedPreferences p;
+  late Prefs p;
 
   String name = 'Boss', persona = 'robot', provider = 'gemini', tts = 'device', lang = 'hi-IN', theme = 'purple';
   String avatar = '', wall = '', pin = '';
@@ -262,7 +290,7 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> load() async {
-    p = await SharedPreferences.getInstance();
+    p = await Prefs.open();
     final j = p.getString('s');
     if (j != null) {
       try { fromMap(jsonDecode(j) as Map<String, dynamic>); } catch (_) {}
